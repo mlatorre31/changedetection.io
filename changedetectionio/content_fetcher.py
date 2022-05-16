@@ -5,6 +5,7 @@ import requests
 import time
 import urllib3.exceptions
 import sys
+import json
 
 
 class EmptyReply(Exception):
@@ -229,6 +230,12 @@ class base_html_webdriver(Fetcher):
 
         try:
             self.driver.get(url)
+            try:
+                cookie = json.loads(request_headers.get('Cookie'))
+                self.driver.add_cookie(cookie)
+                self.driver.refresh()
+            except:
+                pass
         except WebDriverException as e:
             # Be sure we close the session window
             self.quit()
