@@ -36,11 +36,14 @@ from flask import (
     url_for,
 )
 from flask_login import login_required
+from flask_restful import abort, Api
+
 from flask_wtf import CSRFProtect
 
 from changedetectionio import html_tools
+from changedetectionio.api import api_v1
 
-__version__ = '0.39.13.1'
+__version__ = '0.39.14'
 
 datastore = None
 
@@ -77,6 +80,8 @@ csrf = CSRFProtect()
 csrf.init_app(app)
 
 notification_debug_log=[]
+
+watch_api = Api(app, decorators=[csrf.exempt])
 
 def init_app_secret(datastore_path):
     secret = ""
@@ -178,6 +183,25 @@ def changedetection_app(config=None, datastore_o=None):
     login_manager = flask_login.LoginManager(app)
     login_manager.login_view = 'login'
     app.secret_key = init_app_secret(config['datastore_path'])
+
+
+    watch_api.add_resource(api_v1.WatchSingleHistory,
+                           '/api/v1/watch/<string:uuid>/history/<string:timestamp>',
+                           resource_class_kwargs={'datastore': datastore, 'update_q': update_q})
+
+    watch_api.add_resource(api_v1.WatchHistory,
+                           '/api/v1/watch/<string:uuid>/history',
+                           resource_class_kwargs={'datastore': datastore})
+
+    watch_api.add_resource(api_v1.CreateWatch, '/api/v1/watch',
+                           resource_class_kwargs={'datastore': datastore, 'update_q': update_q})
+
+    watch_api.add_resource(api_v1.Watch, '/api/v1/watch/<string:uuid>',
+                           resource_class_kwargs={'datastore': datastore, 'update_q': update_q})
+
+
+
+
 
     # Setup cors headers to allow all domains
     # https://flask-cors.readthedocs.io/en/latest/
@@ -367,6 +391,8 @@ def changedetection_app(config=None, datastore_o=None):
 
             if limit_tag != None:
                 # Support for comma separated list of tags.
+                if watch['tag'] is None:
+                    continue
                 for tag_in_watch in watch['tag'].split(','):
                     tag_in_watch = tag_in_watch.strip()
                     if tag_in_watch == limit_tag:
@@ -520,16 +546,9 @@ def changedetection_app(config=None, datastore_o=None):
 
         # Defaults for proxy choice
         if datastore.proxy_list is not None:  # When enabled
-            system_proxy = datastore.data['settings']['requests']['proxy']
-            if default['proxy'] is None:
-                default['proxy'] = system_proxy
-            else:
-                # Does the chosen one exist?
-                if not any(default['proxy'] in tup for tup in datastore.proxy_list):
-                    default['proxy'] = datastore.proxy_list[0][0]
-
-            # Used by the form handler to keep or remove the proxy settings
-            default['proxy_list'] = datastore.proxy_list
+            # Radio needs '' not None, or incase that the chosen one no longer exists
+            if default['proxy'] is None or not any(default['proxy'] in tup for tup in datastore.proxy_list):
+                default['proxy'] = ''
 
         # proxy_override set to the json/text list of the items
         form = forms.watchForm(formdata=request.form if request.method == 'POST' else None,
@@ -540,9 +559,7 @@ def changedetection_app(config=None, datastore_o=None):
             # @todo - Couldn't get setattr() etc dynamic addition working, so remove it instead
             del form.proxy
         else:
-            form.proxy.choices = datastore.proxy_list
-            if default['proxy'] is None:
-                form.proxy.default='http://hello'
+            form.proxy.choices = [('', 'Default')] + datastore.proxy_list
 
         if request.method == 'POST' and form.validate():
             extra_update_obj = {}
@@ -579,6 +596,10 @@ def changedetection_app(config=None, datastore_o=None):
                 if len(datastore.data['watching'][uuid]['history']):
                     extra_update_obj['previous_md5'] = get_current_checksum_include_ignore_text(uuid=uuid)
 
+            # Be sure proxy value is None
+            if datastore.proxy_list is not None and form.data['proxy'] == '':
+                extra_update_obj['proxy'] = None
+
             datastore.data['watching'][uuid].update(form.data)
             datastore.data['watching'][uuid].update(extra_update_obj)
 
@@ -605,14 +626,22 @@ def changedetection_app(config=None, datastore_o=None):
             if request.method == 'POST' and not form.validate():
                 flash("An error occurred, please see below.", "error")
 
+            visualselector_data_is_ready = datastore.visualselector_data_is_ready(uuid)
+
+            # Only works reliably with Playwright
+            visualselector_enabled = os.getenv('PLAYWRIGHT_DRIVER_URL', False) and default['fetch_backend'] == 'html_webdriver'
+
 
             output = render_template("edit.html",
                                      uuid=uuid,
                                      watch=datastore.data['watching'][uuid],
                                      form=form,
                                      has_empty_checktime=using_default_check_time,
+                                     using_global_webdriver_wait=default['webdriver_delay'] is None,
                                      current_base_url=datastore.data['settings']['application']['base_url'],
-                                     emailprefix=os.getenv('NOTIFICATION_MAIL_BUTTON_PREFIX', False)
+                                     emailprefix=os.getenv('NOTIFICATION_MAIL_BUTTON_PREFIX', False),
+                                     visualselector_data_is_ready=visualselector_data_is_ready,
+                                     visualselector_enabled=visualselector_enabled
                                      )
 
         return output
@@ -676,6 +705,7 @@ def changedetection_app(config=None, datastore_o=None):
                                  form=form,
                                  current_base_url = datastore.data['settings']['application']['base_url'],
                                  hide_remove_pass=os.getenv("SALTED_PASS", False),
+                                 api_key=datastore.data['settings']['application'].get('api_access_token'),
                                  emailprefix=os.getenv('NOTIFICATION_MAIL_BUTTON_PREFIX', False))
 
         return output
@@ -874,27 +904,6 @@ def changedetection_app(config=None, datastore_o=None):
 
         return output
 
-    @app.route("/api/<string:uuid>/snapshot/current", methods=['GET'])
-    @login_required
-    def api_snapshot(uuid):
-
-        # More for testing, possible to return the first/only
-        if uuid == 'first':
-            uuid = list(datastore.data['watching'].keys()).pop()
-
-        try:
-            watch = datastore.data['watching'][uuid]
-        except KeyError:
-            return abort(400, "No history found for the specified link, bad link?")
-
-        newest = list(watch['history'].keys())[-1]
-        with open(watch['history'][newest], 'r') as f:
-            content = f.read()
-
-        resp = make_response(content)
-        resp.headers['Content-Type'] = 'text/plain'
-        return resp
-
     @app.route("/favicon.ico", methods=['GET'])
     def favicon():
         return send_from_directory("static/images", path="favicon.ico")
@@ -975,10 +984,9 @@ def changedetection_app(config=None, datastore_o=None):
 
     @app.route("/static/<string:group>/<string:filename>", methods=['GET'])
     def static_content(group, filename):
+        from flask import make_response
+
         if group == 'screenshot':
-
-            from flask import make_response
-
             # Could be sensitive, follow password requirements
             if datastore.data['settings']['application']['password'] and not flask_login.current_user.is_authenticated:
                 abort(403)
@@ -997,6 +1005,26 @@ def changedetection_app(config=None, datastore_o=None):
             except FileNotFoundError:
                 abort(404)
 
+
+        if group == 'visual_selector_data':
+            # Could be sensitive, follow password requirements
+            if datastore.data['settings']['application']['password'] and not flask_login.current_user.is_authenticated:
+                abort(403)
+
+            # These files should be in our subdirectory
+            try:
+                # set nocache, set content-type
+                watch_dir = datastore_o.datastore_path + "/" + filename
+                response = make_response(send_from_directory(filename="elements.json", directory=watch_dir, path=watch_dir + "/elements.json"))
+                response.headers['Content-type'] = 'application/json'
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = 0
+                return response
+
+            except FileNotFoundError:
+                abort(404)
+
         # These files should be in our subdirectory
         try:
             return send_from_directory("static/{}".format(group), path=filename)
@@ -1005,7 +1033,7 @@ def changedetection_app(config=None, datastore_o=None):
 
     @app.route("/api/add", methods=['POST'])
     @login_required
-    def api_watch_add():
+    def form_watch_add():
         from changedetectionio import forms
         form = forms.quickWatchForm(request.form)
 
@@ -1031,7 +1059,7 @@ def changedetection_app(config=None, datastore_o=None):
 
     @app.route("/api/delete", methods=['GET'])
     @login_required
-    def api_delete():
+    def form_delete():
         uuid = request.args.get('uuid')
 
         if uuid != 'all' and not uuid in datastore.data['watching'].keys():
@@ -1048,7 +1076,7 @@ def changedetection_app(config=None, datastore_o=None):
 
     @app.route("/api/clone", methods=['GET'])
     @login_required
-    def api_clone():
+    def form_clone():
         uuid = request.args.get('uuid')
         # More for testing, possible to return the first/only
         if uuid == 'first':
@@ -1062,7 +1090,7 @@ def changedetection_app(config=None, datastore_o=None):
 
     @app.route("/api/checknow", methods=['GET'])
     @login_required
-    def api_watch_checknow():
+    def form_watch_checknow():
 
         tag = request.args.get('tag')
         uuid = request.args.get('uuid')
@@ -1099,7 +1127,7 @@ def changedetection_app(config=None, datastore_o=None):
 
     @app.route("/api/share-url", methods=['GET'])
     @login_required
-    def api_share_put_watch():
+    def form_share_put_watch():
         """Given a watch UUID, upload the info and return a share-link
            the share-link can be imported/added"""
         import requests
@@ -1148,7 +1176,6 @@ def changedetection_app(config=None, datastore_o=None):
         # in the browser - should give you a nice info page - wtf
         # paste in etc
         return redirect(url_for('index'))
-
 
     # @todo handle ctrl break
     ticker_thread = threading.Thread(target=ticker_thread_check_time_launch_checks).start()

@@ -27,9 +27,11 @@ class model(dict):
                     'proxy': None # Preferred proxy connection
                 },
                 'application': {
+                    'api_access_token_enabled': True,
                     'password': False,
                     'base_url' : None,
                     'extract_title_as_title': False,
+                    'empty_pages_are_a_change': False,
                     'fetch_backend': os.getenv("DEFAULT_FETCH_BACKEND", "html_requests"),
                     'global_ignore_text': [], # List of text to ignore when calculating the comparison checksum
                     'global_subtractive_selectors': [],
@@ -41,7 +43,8 @@ class model(dict):
                     'notification_body': default_notification_body,
                     'notification_format': default_notification_format,
                     'real_browser_save_screenshot': True,
-                    'schema_version' : 0
+                    'schema_version' : 0,
+                    'webdriver_delay': None  # Extra delay in seconds before extracting text
                 }
             }
         }

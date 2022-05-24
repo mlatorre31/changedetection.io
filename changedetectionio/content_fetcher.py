@@ -3,10 +3,8 @@ import chardet
 import os
 import requests
 import time
-import urllib3.exceptions
 import sys
 import json
-
 
 class EmptyReply(Exception):
     def __init__(self, status_code, url):
@@ -14,7 +12,14 @@ class EmptyReply(Exception):
         self.status_code = status_code
         self.url = url
         return
+    pass
 
+class ReplyWithContentButNoText(Exception):
+    def __init__(self, status_code, url):
+        # Set this so we can use it in other parts of the app
+        self.status_code = status_code
+        self.url = url
+        return
     pass
 
 
@@ -23,11 +28,133 @@ class Fetcher():
     status_code = None
     content = None
     headers = None
+
+    fetcher_description = "No description"
+    xpath_element_js = """               
+                // Include the getXpath script directly, easier than fetching
+                !function(e,n){"object"==typeof exports&&"undefined"!=typeof module?module.exports=n():"function"==typeof define&&define.amd?define(n):(e=e||self).getXPath=n()}(this,function(){return function(e){var n=e;if(n&&n.id)return'//*[@id="'+n.id+'"]';for(var o=[];n&&Node.ELEMENT_NODE===n.nodeType;){for(var i=0,r=!1,d=n.previousSibling;d;)d.nodeType!==Node.DOCUMENT_TYPE_NODE&&d.nodeName===n.nodeName&&i++,d=d.previousSibling;for(d=n.nextSibling;d;){if(d.nodeName===n.nodeName){r=!0;break}d=d.nextSibling}o.push((n.prefix?n.prefix+":":"")+n.localName+(i||r?"["+(i+1)+"]":"")),n=n.parentNode}return o.length?"/"+o.reverse().join("/"):""}});
+
+
+                const findUpTag = (el) => {
+                  let r = el
+                  chained_css = [];
+                  depth=0;
+            
+                // Strategy 1: Keep going up until we hit an ID tag, imagine it's like  #list-widget div h4
+                  while (r.parentNode) {
+                    if(depth==5) {
+                      break;
+                    }
+                    if('' !==r.id) {
+                      chained_css.unshift("#"+r.id);
+                      final_selector= chained_css.join('>');
+                      // Be sure theres only one, some sites have multiples of the same ID tag :-(
+                      if (window.document.querySelectorAll(final_selector).length ==1 ) {
+                        return final_selector;
+                      }
+                      return null;
+                    } else {
+                      chained_css.unshift(r.tagName.toLowerCase());
+                    }
+                    r=r.parentNode;
+                    depth+=1;
+                  }
+                  return null;
+                }
+
+
+                // @todo - if it's SVG or IMG, go into image diff mode
+                var elements = window.document.querySelectorAll("div,span,form,table,tbody,tr,td,a,p,ul,li,h1,h2,h3,h4, header, footer, section, article, aside, details, main, nav, section, summary");
+                var size_pos=[];
+                // after page fetch, inject this JS
+                // build a map of all elements and their positions (maybe that only include text?)
+                var bbox;
+                for (var i = 0; i < elements.length; i++) {   
+                 bbox = elements[i].getBoundingClientRect();
+
+                 // forget really small ones
+                 if (bbox['width'] <20 && bbox['height'] < 20 ) {
+                   continue;
+                 }
+
+                 // @todo the getXpath kind of sucks, it doesnt know when there is for example just one ID sometimes
+                 // it should not traverse when we know we can anchor off just an ID one level up etc..
+                 // maybe, get current class or id, keep traversing up looking for only class or id until there is just one match 
+
+                 // 1st primitive - if it has class, try joining it all and select, if theres only one.. well thats us.
+                 xpath_result=false;
+                 
+                 try {
+                   var d= findUpTag(elements[i]);
+                   if (d) {
+                     xpath_result =d;
+                   }                
+                 } catch (e) {
+                   console.log(e);
+                 }
+                 
+                 // You could swap it and default to getXpath and then try the smarter one
+                 // default back to the less intelligent one
+                 if (!xpath_result) {
+                    try {
+                       // I've seen on FB and eBay that this doesnt work
+                       // ReferenceError: getXPath is not defined at eval (eval at evaluate (:152:29), <anonymous>:67:20) at UtilityScript.evaluate (<anonymous>:159:18) at UtilityScript.<anonymous> (<anonymous>:1:44)
+                       xpath_result = getXPath(elements[i]);
+                     } catch (e) {
+                       console.log(e);
+                       continue;
+                     }            
+                 }
+                 
+                 if(window.getComputedStyle(elements[i]).visibility === "hidden") {
+                   continue;
+                 }
+
+                 size_pos.push({
+                   xpath: xpath_result,
+                   width: Math.round(bbox['width']), 
+                   height: Math.round(bbox['height']), 
+                   left: Math.floor(bbox['left']), 
+                   top: Math.floor(bbox['top']), 
+                   childCount: elements[i].childElementCount
+                 });                 
+                }
+
+
+                // inject the current one set in the css_filter, which may be a CSS rule
+                // used for displaying the current one in VisualSelector, where its not one we generated.
+                if (css_filter.length) {
+                   // is it xpath?
+                   if (css_filter.startsWith('/') ) {
+                     q=document.evaluate(css_filter, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                   } else {
+                     q=document.querySelector(css_filter);
+                   }
+                   bbox = q.getBoundingClientRect();                
+                   if (bbox && bbox['width'] >0 && bbox['height']>0) {                       
+                       size_pos.push({
+                           xpath: css_filter,
+                           width: bbox['width'], 
+                           height: bbox['height'],
+                           left: bbox['left'],
+                           top: bbox['top'],
+                           childCount: q.childElementCount
+                         });
+                     }
+                }
+// https://stackoverflow.com/questions/1145850/how-to-get-height-of-entire-document-with-javascript
+                return {'size_pos':size_pos, 'browser_width': window.innerWidth, 'browser_height':document.body.scrollHeight};
+    """
+    xpath_data = None
+
     # Will be needed in the future by the VisualSelector, always get this where possible.
     screenshot = False
     fetcher_description = "No description"
     system_http_proxy = os.getenv('HTTP_PROXY')
     system_https_proxy = os.getenv('HTTPS_PROXY')
+
+    # Time ONTOP of the system defined env minimum time
+    render_extract_delay=0
 
     @abstractmethod
     def get_error(self):
@@ -40,7 +167,8 @@ class Fetcher():
             request_headers,
             request_body,
             request_method,
-            ignore_status_codes=False):
+            ignore_status_codes=False,
+            current_css_filter=None):
         # Should set self.error, self.status_code and self.content
         pass
 
@@ -121,7 +249,8 @@ class base_html_playwright(Fetcher):
             request_headers,
             request_body,
             request_method,
-            ignore_status_codes=False):
+            ignore_status_codes=False,
+            current_css_filter=None):
 
         from playwright.sync_api import sync_playwright
         import playwright._impl._api_types
@@ -141,14 +270,14 @@ class base_html_playwright(Fetcher):
                 proxy=self.proxy
             )
             page = context.new_page()
-            page.set_viewport_size({"width": 1280, "height": 1024})
             try:
+               # Bug - never set viewport size BEFORE page.goto
                 response = page.goto(url, timeout=timeout * 1000, wait_until='commit')
                 # Wait_until = commit
                 # - `'commit'` - consider operation to be finished when network response is received and the document started loading.
                 # Better to not use any smarts from Playwright and just wait an arbitrary number of seconds
                 # This seemed to solve nearly all 'TimeoutErrors'
-                extra_wait = int(os.getenv("WEBDRIVER_DELAY_BEFORE_CONTENT_READY", 5))
+                extra_wait = int(os.getenv("WEBDRIVER_DELAY_BEFORE_CONTENT_READY", 5)) + self.render_extract_delay
                 page.wait_for_timeout(extra_wait * 1000)
             except playwright._impl._api_types.TimeoutError as e:
                 raise EmptyReply(url=url, status_code=None)
@@ -156,14 +285,30 @@ class base_html_playwright(Fetcher):
             if response is None:
                 raise EmptyReply(url=url, status_code=None)
 
+            if len(page.content().strip()) == 0:
+                raise EmptyReply(url=url, status_code=None)
+
+            # Bug 2(?) Set the viewport size AFTER loading the page
+            page.set_viewport_size({"width": 1280, "height": 1024})
+            # Bugish - Let the page redraw/reflow
+            page.set_viewport_size({"width": 1280, "height": 1024})
+
             self.status_code = response.status
             self.content = page.content()
             self.headers = response.all_headers()
 
+            if current_css_filter is not None:
+                page.evaluate("var css_filter='{}'".format(current_css_filter))
+            else:
+                page.evaluate("var css_filter=''")
+
+            self.xpath_data = page.evaluate("async () => {" + self.xpath_element_js + "}")
+            # Bug 3 in Playwright screenshot handling
             # Some bug where it gives the wrong screenshot size, but making a request with the clip set first seems to solve it
             # JPEG is better here because the screenshots can be very very large
             page.screenshot(type='jpeg', clip={'x': 1.0, 'y': 1.0, 'width': 1280, 'height': 1024})
-            self.screenshot = page.screenshot(type='jpeg', full_page=True, quality=90)
+            self.screenshot = page.screenshot(type='jpeg', full_page=True, quality=92)
+
             context.close()
             browser.close()
 
@@ -215,7 +360,8 @@ class base_html_webdriver(Fetcher):
             request_headers,
             request_body,
             request_method,
-            ignore_status_codes=False):
+            ignore_status_codes=False,
+            current_css_filter=None):
 
         from selenium import webdriver
         from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
@@ -241,17 +387,19 @@ class base_html_webdriver(Fetcher):
             self.quit()
             raise
 
+        self.driver.set_window_size(1280, 1024)
+        self.driver.implicitly_wait(int(os.getenv("WEBDRIVER_DELAY_BEFORE_CONTENT_READY", 5)))
+        self.screenshot = self.driver.get_screenshot_as_png()
+
         # @todo - how to check this? is it possible?
         self.status_code = 200
         # @todo somehow we should try to get this working for WebDriver
         # raise EmptyReply(url=url, status_code=r.status_code)
 
         # @todo - dom wait loaded?
-        time.sleep(int(os.getenv("WEBDRIVER_DELAY_BEFORE_CONTENT_READY", 5)))
+        time.sleep(int(os.getenv("WEBDRIVER_DELAY_BEFORE_CONTENT_READY", 5)) + self.render_extract_delay)
         self.content = self.driver.page_source
         self.headers = {}
-        self.screenshot = self.driver.get_screenshot_as_png()
-        self.quit()
 
     # Does the connection to the webdriver work? run a test connection.
     def is_ready(self):
@@ -288,7 +436,8 @@ class html_requests(Fetcher):
             request_headers,
             request_body,
             request_method,
-            ignore_status_codes=False):
+            ignore_status_codes=False,
+            current_css_filter=None):
 
         proxies={}
 

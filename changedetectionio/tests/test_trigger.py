@@ -76,7 +76,7 @@ def test_trigger_functionality(client, live_server):
     assert b"1 Imported" in res.data
 
     # Trigger a check
-    client.get(url_for("api_watch_checknow"), follow_redirects=True)
+    client.get(url_for("form_watch_checknow"), follow_redirects=True)
 
     # Give the thread time to pick it up
     time.sleep(sleep_time_for_fetch_thread)
@@ -99,7 +99,7 @@ def test_trigger_functionality(client, live_server):
     assert bytes(trigger_text.encode('utf-8')) in res.data
 
     # Trigger a check
-    client.get(url_for("api_watch_checknow"), follow_redirects=True)
+    client.get(url_for("form_watch_checknow"), follow_redirects=True)
 
     # Give the thread time to pick it up
     time.sleep(sleep_time_for_fetch_thread)
@@ -113,7 +113,7 @@ def test_trigger_functionality(client, live_server):
     set_modified_original_ignore_response()
 
     # Trigger a check
-    client.get(url_for("api_watch_checknow"), follow_redirects=True)
+    client.get(url_for("form_watch_checknow"), follow_redirects=True)
     # Give the thread time to pick it up
     time.sleep(sleep_time_for_fetch_thread)
 
@@ -121,14 +121,20 @@ def test_trigger_functionality(client, live_server):
     res = client.get(url_for("index"))
     assert b'unviewed' not in res.data
 
-    # Just to be sure.. set a regular modified change..
+    # Now set the content which contains the trigger text
     time.sleep(sleep_time_for_fetch_thread)
     set_modified_with_trigger_text_response()
 
-    client.get(url_for("api_watch_checknow"), follow_redirects=True)
+    client.get(url_for("form_watch_checknow"), follow_redirects=True)
     time.sleep(sleep_time_for_fetch_thread)
     res = client.get(url_for("index"))
     assert b'unviewed' in res.data
+
+    # https://github.com/dgtlmoon/changedetection.io/issues/616
+    # Apparently the actual snapshot that contains the trigger never shows
+    res = client.get(url_for("diff_history_page", uuid="first"))
+    assert b'foobar123' in res.data
+
 
     # Check the preview/highlighter, we should be able to see what we triggered on, but it should be highlighted
     res = client.get(url_for("preview_page", uuid="first"))
