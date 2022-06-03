@@ -1,12 +1,29 @@
 from abc import ABC, abstractmethod
 import chardet
+import json
 import os
 import requests
 import time
 import sys
 import json
 
+class PageUnloadable(Exception):
+    def __init__(self, status_code, url):
+        # Set this so we can use it in other parts of the app
+        self.status_code = status_code
+        self.url = url
+        return
+    pass
+
 class EmptyReply(Exception):
+    def __init__(self, status_code, url):
+        # Set this so we can use it in other parts of the app
+        self.status_code = status_code
+        self.url = url
+        return
+    pass
+
+class ScreenshotUnavailable(Exception):
     def __init__(self, status_code, url):
         # Set this so we can use it in other parts of the app
         self.status_code = status_code
@@ -124,13 +141,23 @@ class Fetcher():
                 // inject the current one set in the css_filter, which may be a CSS rule
                 // used for displaying the current one in VisualSelector, where its not one we generated.
                 if (css_filter.length) {
-                   // is it xpath?
-                   if (css_filter.startsWith('/') ) {
-                     q=document.evaluate(css_filter, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                   } else {
-                     q=document.querySelector(css_filter);
+                   q=false;                   
+                   try {
+                       // is it xpath?
+                       if (css_filter.startsWith('/') || css_filter.startsWith('xpath:')) {
+                         q=document.evaluate(css_filter.replace('xpath:',''), document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                       } else {
+                         q=document.querySelector(css_filter);
+                       }                       
+                   } catch (e) {
+                    // Maybe catch DOMException and alert? 
+                     console.log(e);                       
                    }
-                   bbox = q.getBoundingClientRect();                
+                   bbox=false;
+                   if(q) {
+                     bbox = q.getBoundingClientRect();
+                   }
+                                   
                    if (bbox && bbox['width'] >0 && bbox['height']>0) {                       
                        size_pos.push({
                            xpath: css_filter,
@@ -142,8 +169,8 @@ class Fetcher():
                          });
                      }
                 }
-// https://stackoverflow.com/questions/1145850/how-to-get-height-of-entire-document-with-javascript
-                return {'size_pos':size_pos, 'browser_width': window.innerWidth, 'browser_height':document.body.scrollHeight};
+                // Window.width required for proper scaling in the frontend
+                return {'size_pos':size_pos, 'browser_width': window.innerWidth};
     """
     xpath_data = None
 
@@ -267,8 +294,13 @@ class base_html_playwright(Fetcher):
             # Use the default one configured in the App.py model that's passed from fetch_site_status.py
             context = browser.new_context(
                 user_agent=request_headers['User-Agent'] if request_headers.get('User-Agent') else 'Mozilla/5.0',
-                proxy=self.proxy
+                proxy=self.proxy,
+                # This is needed to enable JavaScript execution on GitHub and others
+                bypass_csp=True,
+                # Should never be needed
+                accept_downloads=False
             )
+
             page = context.new_page()
             try:
                # Bug - never set viewport size BEFORE page.goto
@@ -280,17 +312,25 @@ class base_html_playwright(Fetcher):
                 extra_wait = int(os.getenv("WEBDRIVER_DELAY_BEFORE_CONTENT_READY", 5)) + self.render_extract_delay
                 page.wait_for_timeout(extra_wait * 1000)
             except playwright._impl._api_types.TimeoutError as e:
+                context.close()
+                browser.close()
                 raise EmptyReply(url=url, status_code=None)
+            except Exception as e:
+                context.close()
+                browser.close()
+                raise PageUnloadable(url=url, status_code=None)
 
             if response is None:
+                context.close()
+                browser.close()
                 raise EmptyReply(url=url, status_code=None)
 
             if len(page.content().strip()) == 0:
+                context.close()
+                browser.close()
                 raise EmptyReply(url=url, status_code=None)
 
             # Bug 2(?) Set the viewport size AFTER loading the page
-            page.set_viewport_size({"width": 1280, "height": 1024})
-            # Bugish - Let the page redraw/reflow
             page.set_viewport_size({"width": 1280, "height": 1024})
 
             self.status_code = response.status
@@ -298,16 +338,22 @@ class base_html_playwright(Fetcher):
             self.headers = response.all_headers()
 
             if current_css_filter is not None:
-                page.evaluate("var css_filter='{}'".format(current_css_filter))
+                page.evaluate("var css_filter={}".format(json.dumps(current_css_filter)))
             else:
                 page.evaluate("var css_filter=''")
 
             self.xpath_data = page.evaluate("async () => {" + self.xpath_element_js + "}")
+
             # Bug 3 in Playwright screenshot handling
             # Some bug where it gives the wrong screenshot size, but making a request with the clip set first seems to solve it
             # JPEG is better here because the screenshots can be very very large
-            page.screenshot(type='jpeg', clip={'x': 1.0, 'y': 1.0, 'width': 1280, 'height': 1024})
-            self.screenshot = page.screenshot(type='jpeg', full_page=True, quality=92)
+            try:
+                page.screenshot(type='jpeg', clip={'x': 1.0, 'y': 1.0, 'width': 1280, 'height': 1024})
+                self.screenshot = page.screenshot(type='jpeg', full_page=True, quality=92)
+            except Exception as e:
+                context.close()
+                browser.close()
+                raise ScreenshotUnavailable(url=url, status_code=None)
 
             context.close()
             browser.close()
