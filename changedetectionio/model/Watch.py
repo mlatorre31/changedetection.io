@@ -13,7 +13,6 @@ from changedetectionio.notification import (
 class model(dict):
     __newest_history_key = None
     __history_n=0
-
     __base_config = {
             'url': None,
             'tag': None,
@@ -35,19 +34,24 @@ class model(dict):
             'notification_title': default_notification_title,
             'notification_body': default_notification_body,
             'notification_format': default_notification_format,
-            'css_filter': "",
+            'css_filter': '',
+            'extract_text': [],  # Extract text by regex after filters
             'subtractive_selectors': [],
             'trigger_text': [],  # List of text or regex to wait for until a change is detected
+            'text_should_not_be_present': [], # Text that should not present
             'fetch_backend': None,
             'extract_title_as_title': False,
+            'check_unique_lines': False, # On change-detected, compare against all history if its something new
             'proxy': None, # Preferred proxy connection
             # Re #110, so then if this is set to None, we know to use the default value instead
             # Requires setting to None on submit if it's the same as the default
             # Should be all None by default, so we use the system default in this case.
             'time_between_check': {'weeks': None, 'days': None, 'hours': None, 'minutes': None, 'seconds': None},
-            'webdriver_delay': None
+            'webdriver_delay': None,
+            'webdriver_js_execute_code': None, # Run before change-detection
         }
-
+    jitter_seconds = 0
+    mtable = {'seconds': 1, 'minutes': 60, 'hours': 3600, 'days': 86400, 'weeks': 86400 * 7}
     def __init__(self, *arg, **kw):
         import uuid
         self.update(self.__base_config)
@@ -84,7 +88,7 @@ class model(dict):
         # Read the history file as a dict
         fname = os.path.join(self.__datastore_path, self.get('uuid'), "history.txt")
         if os.path.isfile(fname):
-            logging.debug("Disk IO accessed " + str(time.time()))
+            logging.debug("Reading history index " + str(time.time()))
             with open(fname, "r") as f:
                 tmp_history = dict(i.strip().split(',', 2) for i in f.readlines())
 
@@ -156,9 +160,21 @@ class model(dict):
 
     def threshold_seconds(self):
         seconds = 0
-        mtable = {'seconds': 1, 'minutes': 60, 'hours': 3600, 'days': 86400, 'weeks': 86400 * 7}
-        for m, n in mtable.items():
+        for m, n in self.mtable.items():
             x = self.get('time_between_check', {}).get(m, None)
             if x:
                 seconds += x * n
         return seconds
+
+    # Iterate over all history texts and see if something new exists
+    def lines_contain_something_unique_compared_to_history(self, lines=[]):
+        local_lines = [l.decode('utf-8').strip().lower() for l in lines]
+
+        # Compare each lines (set) against each history text file (set) looking for something new..
+        for k, v in self.history.items():
+            alist = [line.decode('utf-8').strip().lower() for line in open(v, 'rb')]
+            res = set(alist) != set(local_lines)
+            if res:
+                return True
+
+        return False

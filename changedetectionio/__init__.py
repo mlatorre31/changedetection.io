@@ -20,6 +20,7 @@ from copy import deepcopy
 from threading import Event
 
 import flask_login
+import logging
 import pytz
 import timeago
 from feedgen.feed import FeedGenerator
@@ -43,7 +44,7 @@ from flask_wtf import CSRFProtect
 from changedetectionio import html_tools
 from changedetectionio.api import api_v1
 
-__version__ = '0.39.14'
+__version__ = '0.39.16'
 
 datastore = None
 
@@ -107,7 +108,7 @@ def _jinja2_filter_datetime(watch_obj, format="%Y-%m-%d %H:%M:%S"):
     # Worker thread tells us which UUID it is currently processing.
     for t in running_update_threads:
         if t.current_uuid == watch_obj['uuid']:
-            return "Checking now.."
+            return '<span class="loader"></span><span> Checking now</span>'
 
     if watch_obj['last_checked'] == 0:
         return 'Not yet'
@@ -297,7 +298,7 @@ def changedetection_app(config=None, datastore_o=None):
         # Sort by last_changed and add the uuid which is usually the key..
         sorted_watches = []
 
-        # @todo needs a .itemsWithTag() or something
+        # @todo needs a .itemsWithTag() or something - then we can use that in Jinaj2 and throw this away
         for uuid, watch in datastore.data['watching'].items():
 
             if limit_tag != None:
@@ -351,7 +352,8 @@ def changedetection_app(config=None, datastore_o=None):
                 latest_fname = watch.history[dates[-1]]
 
                 html_diff = diff.render_diff(prev_fname, latest_fname, include_equal=False, line_feed_sep="</br>")
-                fe.description(description="<![CDATA[<html><body><h4>{}</h4>{}</body></html>".format(watch_title, html_diff))
+                fe.content(content="<html><body><h4>{}</h4>{}</body></html>".format(watch_title, html_diff),
+                           type='CDATA')
 
                 fe.guid(guid, permalink=False)
                 dt = datetime.datetime.fromtimestamp(int(watch.newest_history_key))
@@ -359,7 +361,7 @@ def changedetection_app(config=None, datastore_o=None):
                 fe.pubDate(dt)
 
         response = make_response(fg.rss_str())
-        response.headers.set('Content-Type', 'application/rss+xml')
+        response.headers.set('Content-Type', 'application/rss+xml;charset=utf-8')
         return response
 
     @app.route("/", methods=['GET'])
@@ -401,8 +403,6 @@ def changedetection_app(config=None, datastore_o=None):
                 watch['uuid'] = uuid
                 sorted_watches.append(watch)
 
-        sorted_watches.sort(key=lambda x: x['last_changed'], reverse=True)
-
         existing_tags = datastore.get_all_tags()
 
         form = forms.quickWatchForm(request.form)
@@ -431,7 +431,9 @@ def changedetection_app(config=None, datastore_o=None):
     def ajax_callback_send_notification_test():
 
         import apprise
-        apobj = apprise.Apprise()
+        from .apprise_asset import asset
+        apobj = apprise.Apprise(asset=asset)
+
 
         # validate URLS
         if not len(request.form['notification_urls'].strip()):
@@ -456,25 +458,39 @@ def changedetection_app(config=None, datastore_o=None):
 
         return 'OK'
 
-    @app.route("/scrub", methods=['GET', 'POST'])
+
+    @app.route("/clear_history/<string:uuid>", methods=['GET'])
     @login_required
-    def scrub_page():
+    def clear_watch_history(uuid):
+        try:
+            datastore.clear_watch_history(uuid)
+        except KeyError:
+            flash('Watch not found', 'error')
+        else:
+            flash("Cleared snapshot history for watch {}".format(uuid))
+
+        return redirect(url_for('index'))
+
+    @app.route("/clear_history", methods=['GET', 'POST'])
+    @login_required
+    def clear_all_history():
 
         if request.method == 'POST':
             confirmtext = request.form.get('confirmtext')
 
-            if confirmtext == 'scrub':
+            if confirmtext == 'clear':
                 changes_removed = 0
                 for uuid in datastore.data['watching'].keys():
-                    datastore.scrub_watch(uuid)
+                    datastore.clear_watch_history(uuid)
+                    #TODO: KeyError not checked, as it is above
 
-                flash("Cleared all snapshot history")
+                flash("Cleared snapshot history for all watches")
             else:
                 flash('Incorrect confirmation text.', 'error')
 
             return redirect(url_for('index'))
 
-        output = render_template("scrub.html")
+        output = render_template("clear_all_history.html")
         return output
 
 
@@ -641,7 +657,8 @@ def changedetection_app(config=None, datastore_o=None):
                                      current_base_url=datastore.data['settings']['application']['base_url'],
                                      emailprefix=os.getenv('NOTIFICATION_MAIL_BUTTON_PREFIX', False),
                                      visualselector_data_is_ready=visualselector_data_is_ready,
-                                     visualselector_enabled=visualselector_enabled
+                                     visualselector_enabled=visualselector_enabled,
+                                     playwright_enabled=os.getenv('PLAYWRIGHT_DRIVER_URL', False)
                                      )
 
         return output
@@ -807,18 +824,25 @@ def changedetection_app(config=None, datastore_o=None):
 
         screenshot_url = datastore.get_screenshot(uuid)
 
-        output = render_template("diff.html", watch_a=watch,
+        system_uses_webdriver = datastore.data['settings']['application']['fetch_backend'] == 'html_webdriver'
+
+        is_html_webdriver = True if watch.get('fetch_backend') == 'html_webdriver' or (
+                    watch.get('fetch_backend', None) is None and system_uses_webdriver) else False
+
+        output = render_template("diff.html",
+                                 watch_a=watch,
                                  newest=newest_version_file_contents,
                                  previous=previous_version_file_contents,
                                  extra_stylesheets=extra_stylesheets,
-                                 versions=dates[1:],
+                                 versions=dates[:-1], # All except current/last
                                  uuid=uuid,
                                  newest_version_timestamp=dates[-1],
                                  current_previous_version=str(previous_version),
                                  current_diff_url=watch['url'],
                                  extra_title=" - Diff - {}".format(watch['title'] if watch['title'] else watch['url']),
                                  left_sticky=True,
-                                 screenshot=screenshot_url)
+                                 screenshot=screenshot_url,
+                                 is_html_webdriver=is_html_webdriver)
 
         return output
 
@@ -832,6 +856,12 @@ def changedetection_app(config=None, datastore_o=None):
         # More for testing, possible to return the first/only
         if uuid == 'first':
             uuid = list(datastore.data['watching'].keys()).pop()
+
+        # Normally you would never reach this, because the 'preview' button is not available when there's no history
+        # However they may try to clear snapshots and reload the page
+        if datastore.data['watching'][uuid].history_n == 0:
+            flash("Preview unavailable - No fetch/check completed or triggers not reached", "error")
+            return redirect(url_for('index'))
 
         extra_stylesheets = [url_for('static_content', group='styles', filename='diff.css')]
 
@@ -879,6 +909,11 @@ def changedetection_app(config=None, datastore_o=None):
             content.append({'line': "No history found", 'classes': ''})
 
         screenshot_url = datastore.get_screenshot(uuid)
+        system_uses_webdriver = datastore.data['settings']['application']['fetch_backend'] == 'html_webdriver'
+
+        is_html_webdriver = True if watch.get('fetch_backend') == 'html_webdriver' or (
+                watch.get('fetch_backend', None) is None and system_uses_webdriver) else False
+
         output = render_template("preview.html",
                                  content=content,
                                  extra_stylesheets=extra_stylesheets,
@@ -887,8 +922,9 @@ def changedetection_app(config=None, datastore_o=None):
                                  current_diff_url=watch['url'],
                                  screenshot=screenshot_url,
                                  watch=watch,
-                                 uuid=uuid)
-        
+                                 uuid=uuid,
+                                 is_html_webdriver=is_html_webdriver)
+
         return output
 
     @app.route("/settings/notification-logs", methods=['GET'])
@@ -896,7 +932,7 @@ def changedetection_app(config=None, datastore_o=None):
     def notification_logs():
         global notification_debug_log
         output = render_template("notification-log.html",
-                                 logs=notification_debug_log if len(notification_debug_log) else ["No errors or warnings detected"])
+                                 logs=notification_debug_log if len(notification_debug_log) else ["Notification logs are empty - no notifications sent yet."])
 
         return output
 
@@ -1167,7 +1203,8 @@ def changedetection_app(config=None, datastore_o=None):
 
 
         except Exception as e:
-            flash("Could not share, something went wrong while communicating with the share server.", 'error')
+            logging.error("Error sharing -{}".format(str(e)))
+            flash("Could not share, something went wrong while communicating with the share server - {}".format(str(e)), 'error')
 
         # https://changedetection.io/share/VrMv05wpXyQa
         # in the browser - should give you a nice info page - wtf
@@ -1215,6 +1252,9 @@ def check_for_new_version():
 
 def notification_runner():
     global notification_debug_log
+    from datetime import datetime
+    import json
+
     while not app.config.exit.is_set():
         try:
             # At the moment only one thread runs (single runner)
@@ -1223,13 +1263,17 @@ def notification_runner():
             time.sleep(1)
 
         else:
-            # Process notifications
+
+            now = datetime.now()
+            sent_obj = None
+
             try:
                 from changedetectionio import notification
-                notification.process_notification(n_object, datastore)
+
+                sent_obj = notification.process_notification(n_object, datastore)
 
             except Exception as e:
-                print("Watch URL: {}  Error {}".format(n_object['watch_url'], str(e)))
+                logging.error("Watch URL: {}  Error {}".format(n_object['watch_url'], str(e)))
 
                 # UUID wont be present when we submit a 'test' from the global settings
                 if 'uuid' in n_object:
@@ -1239,14 +1283,18 @@ def notification_runner():
                 log_lines = str(e).splitlines()
                 notification_debug_log += log_lines
 
-                # Trim the log length
-                notification_debug_log = notification_debug_log[-100:]
-
+            # Process notifications
+            notification_debug_log+= ["{} - SENDING - {}".format(now.strftime("%Y/%m/%d %H:%M:%S,000"), json.dumps(sent_obj))]
+            # Trim the log length
+            notification_debug_log = notification_debug_log[-100:]
 
 # Thread runner to check every minute, look for new watches to feed into the Queue.
 def ticker_thread_check_time_launch_checks():
+    import random
     from changedetectionio import update_worker
-    import logging
+
+    recheck_time_minimum_seconds = int(os.getenv('MINIMUM_SECONDS_RECHECK_TIME', 20))
+    print("System env MINIMUM_SECONDS_RECHECK_TIME", recheck_time_minimum_seconds)
 
     # Spin up Workers that do the fetching
     # Can be overriden by ENV or use the default settings
@@ -1279,14 +1327,12 @@ def ticker_thread_check_time_launch_checks():
         while update_q.qsize() >= 2000:
             time.sleep(1)
 
+
+        recheck_time_system_seconds = int(datastore.threshold_seconds)
+
         # Check for watches outside of the time threshold to put in the thread queue.
-        now = time.time()
-
-        recheck_time_minimum_seconds = int(os.getenv('MINIMUM_SECONDS_RECHECK_TIME', 60))
-        recheck_time_system_seconds = datastore.threshold_seconds
-
         for uuid in watch_uuid_list:
-
+            now = time.time()
             watch = datastore.data['watching'].get(uuid)
             if not watch:
                 logging.error("Watch: {} no longer present.".format(uuid))
@@ -1297,20 +1343,33 @@ def ticker_thread_check_time_launch_checks():
                 continue
 
             # If they supplied an individual entry minutes to threshold.
-            threshold = now
-            watch_threshold_seconds = watch.threshold_seconds()
-            if watch_threshold_seconds:
-                threshold -= watch_threshold_seconds
-            else:
-                threshold -= recheck_time_system_seconds
 
-            # Yeah, put it in the queue, it's more than time
-            if watch['last_checked'] <= max(threshold, recheck_time_minimum_seconds):
+            watch_threshold_seconds = watch.threshold_seconds()
+            threshold = watch_threshold_seconds if watch_threshold_seconds > 0 else recheck_time_system_seconds
+
+            # #580 - Jitter plus/minus amount of time to make the check seem more random to the server
+            jitter = datastore.data['settings']['requests'].get('jitter_seconds', 0)
+            if jitter > 0:
+                if watch.jitter_seconds == 0:
+                    watch.jitter_seconds = random.uniform(-abs(jitter), jitter)
+
+
+            seconds_since_last_recheck = now - watch['last_checked']
+            if seconds_since_last_recheck >= (threshold + watch.jitter_seconds) and seconds_since_last_recheck >= recheck_time_minimum_seconds:
                 if not uuid in running_uuids and uuid not in update_q.queue:
+                    print("Queued watch UUID {} last checked at {} queued at {:0.2f} jitter {:0.2f}s, {:0.2f}s since last checked".format(uuid,
+                                                                                                         watch['last_checked'],
+                                                                                                         now,
+                                                                                                         watch.jitter_seconds,
+                                                                                                         now - watch['last_checked']))
+                    # Into the queue with you
                     update_q.put(uuid)
 
-        # Wait a few seconds before checking the list again
-        time.sleep(3)
+                    # Reset for next time
+                    watch.jitter_seconds = 0
+
+        # Wait before checking the list again - saves CPU
+        time.sleep(1)
 
         # Should be low so we can break this out in testing
         app.config.exit.wait(1)

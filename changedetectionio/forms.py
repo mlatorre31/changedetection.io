@@ -223,7 +223,7 @@ class validateURL(object):
         except validators.ValidationFailure:
             message = field.gettext('\'%s\' is not a valid URL.' % (field.data.strip()))
             raise ValidationError(message)
-        
+
 class ValidateListRegex(object):
     """
     Validates that anything that looks like a regex passes as a regex
@@ -330,6 +330,9 @@ class watchForm(commonSettingsForm):
     css_filter = StringField('CSS/JSON/XPATH Filter', [ValidateCSSJSONXPATHInput()], default='')
 
     subtractive_selectors = StringListField('Remove elements', [ValidateCSSJSONXPATHInput(allow_xpath=False, allow_json=False)])
+
+    extract_text = StringListField('Extract text', [ValidateListRegex()])
+
     title = StringField('Title', default='')
 
     ignore_text = StringListField('Ignore text', [ValidateListRegex()])
@@ -337,7 +340,12 @@ class watchForm(commonSettingsForm):
     body = TextAreaField('Request body', [validators.Optional()])
     method = SelectField('Request method', choices=valid_method, default=default_method)
     ignore_status_codes = BooleanField('Ignore status codes (process non-2xx status codes as normal)', default=False)
+    check_unique_lines = BooleanField('Only trigger when new lines appear', default=False)
     trigger_text = StringListField('Trigger/wait for text', [validators.Optional(), ValidateListRegex()])
+    text_should_not_be_present = StringListField('Block change-detection if text matches', [validators.Optional(), ValidateListRegex()])
+
+    webdriver_js_execute_code = TextAreaField('Execute JavaScript before change detection', render_kw={"rows": "5"}, validators=[validators.Optional()])
+
     save_button = SubmitField('Save', render_kw={"class": "pure-button pure-button-primary"})
     save_and_preview_button = SubmitField('Save & Preview', render_kw={"class": "pure-button pure-button-primary"})
     proxy = RadioField('Proxy')
@@ -360,7 +368,9 @@ class watchForm(commonSettingsForm):
 class globalSettingsRequestForm(Form):
     time_between_check = FormField(TimeBetweenCheckForm)
     proxy = RadioField('Proxy')
-
+    jitter_seconds = IntegerField('Random jitter seconds ± check',
+                                  render_kw={"style": "width: 5em;"},
+                                  validators=[validators.NumberRange(min=0, message="Should contain zero or more seconds")])
 
 # datastore.data['settings']['application']..
 class globalSettingsApplicationForm(commonSettingsForm):

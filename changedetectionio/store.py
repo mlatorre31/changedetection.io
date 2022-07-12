@@ -159,12 +159,11 @@ class ChangeDetectionStore:
     def threshold_seconds(self):
         seconds = 0
         mtable = {'seconds': 1, 'minutes': 60, 'hours': 3600, 'days': 86400, 'weeks': 86400 * 7}
-        minimum_seconds_recheck_time = int(os.getenv('MINIMUM_SECONDS_RECHECK_TIME', 60))
         for m, n in mtable.items():
             x = self.__data['settings']['requests']['time_between_check'].get(m)
             if x:
                 seconds += x * n
-        return max(seconds, minimum_seconds_recheck_time)
+        return seconds
 
     @property
     def has_unviewed(self):
@@ -251,14 +250,25 @@ class ChangeDetectionStore:
         return self.data['watching'][uuid].get(val)
 
     # Remove a watchs data but keep the entry (URL etc)
-    def scrub_watch(self, uuid):
+    def clear_watch_history(self, uuid):
         import pathlib
 
-        self.__data['watching'][uuid].update({'history': {}, 'last_checked': 0, 'last_changed': 0, 'previous_md5': False})
-        self.needs_write_urgent = True
+        self.__data['watching'][uuid].update(
+            {'last_checked': 0,
+             'last_changed': 0,
+             'last_viewed': 0,
+             'previous_md5': False,
+             'last_notification_error': False,
+             'last_error': False})
 
-        for item in pathlib.Path(self.datastore_path).rglob(uuid+"/*.txt"):
+        # JSON Data, Screenshots, Textfiles (history index and snapshots), HTML in the future etc
+        for item in pathlib.Path(os.path.join(self.datastore_path, uuid)).rglob("*.*"):
             unlink(item)
+
+        # Force the attr to recalculate
+        bump = self.__data['watching'][uuid].history
+
+        self.needs_write_urgent = True
 
     def add_watch(self, url, tag="", extras=None, write_to_disk_now=True):
 
@@ -280,14 +290,16 @@ class ChangeDetectionStore:
                                      headers={'App-Guid': self.__data['app_guid']})
                 res = r.json()
 
-                # List of permisable stuff we accept from the wild internet
+                # List of permissible attributes we accept from the wild internet
                 for k in ['url', 'tag',
-                                   'paused', 'title',
-                                   'previous_md5', 'headers',
-                                   'body', 'method',
-                                   'ignore_text', 'css_filter',
-                                   'subtractive_selectors', 'trigger_text',
-                                   'extract_title_as_title']:
+                          'paused', 'title',
+                          'previous_md5', 'headers',
+                          'body', 'method',
+                          'ignore_text', 'css_filter',
+                          'subtractive_selectors', 'trigger_text',
+                          'extract_title_as_title', 'extract_text',
+                          'text_should_not_be_present',
+                          'webdriver_js_execute_code']:
                     if res.get(k):
                         apply_extras[k] = res[k]
 
@@ -507,3 +519,11 @@ class ChangeDetectionStore:
                 # But we should set it back to a empty dict so we don't break if this schema runs on an earlier version.
                 # In the distant future we can remove this entirely
                 self.data['watching'][uuid]['history'] = {}
+
+    # We incorrectly stored last_changed when there was not a change, and then confused the output list table
+    def update_3(self):
+        for uuid, watch in self.data['watching'].items():
+            # Be sure it's recalculated
+            p = watch.history
+            if watch.history_n < 2:
+                watch['last_changed'] = 0

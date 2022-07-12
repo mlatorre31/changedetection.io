@@ -33,6 +33,11 @@
                         <span class="pure-form-message-inline">Default time for all watches, when the watch does not have a specific time setting.</span>
                     </div>
                     <div class="pure-control-group">
+                        {{ render_field(form.requests.form.jitter_seconds, class="jitter_seconds") }}
+                        <span class="pure-form-message-inline">Example - 3 seconds random jitter could trigger up to 3 seconds earlier or up to 3 seconds later</span>
+                    </div>
+
+                    <div class="pure-control-group">
                         {% if not hide_remove_pass %}
                             {% if current_user.is_authenticated %}
                                 {{ render_button(form.application.form.removepassword_button) }}
@@ -168,7 +173,7 @@ nav
                 <div class="pure-control-group">
                     {{ render_button(form.save_button) }}
                     <a href="{{url_for('index')}}" class="pure-button button-small button-cancel">Back</a>
-                    <a href="{{url_for('scrub_page')}}" class="pure-button button-small button-cancel">Delete History Snapshot Data</a>
+                    <a href="{{url_for('clear_all_history')}}" class="pure-button button-small button-cancel">Clear Snapshot History</a>
                 </div>
 
             </div>

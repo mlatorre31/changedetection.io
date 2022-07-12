@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 import re
 import time
@@ -105,6 +106,9 @@ class perform_site_check():
         elif system_webdriver_delay is not None:
             fetcher.render_extract_delay = system_webdriver_delay
 
+        if watch['webdriver_js_execute_code'] is not None and watch['webdriver_js_execute_code'].strip():
+            fetcher.webdriver_js_execute_code = watch['webdriver_js_execute_code']
+
         fetcher.run(url, timeout, request_headers, request_body, request_method, ignore_status_code, watch['css_filter'])
         fetcher.quit()
 
@@ -204,39 +208,79 @@ class perform_site_check():
         else:
             stripped_text_from_html = stripped_text_from_html.encode('utf8')
 
+        # 615 Extract text by regex
+        extract_text = watch.get('extract_text', [])
+        if len(extract_text) > 0:
+            regex_matched_output = []
+            for s_re in extract_text:
+                result = re.findall(s_re.encode('utf8'), stripped_text_from_html,
+                                    flags=re.MULTILINE | re.DOTALL | re.LOCALE)
+                if result:
+                    regex_matched_output = regex_matched_output + result
+
+            if regex_matched_output:
+                stripped_text_from_html = b'\n'.join(regex_matched_output)
+                text_content_before_ignored_filter = stripped_text_from_html
+
         # Re #133 - if we should strip whitespaces from triggering the change detected comparison
         if self.datastore.data['settings']['application'].get('ignore_whitespace', False):
             fetched_md5 = hashlib.md5(stripped_text_from_html.translate(None, b'\r\n\t ')).hexdigest()
         else:
             fetched_md5 = hashlib.md5(stripped_text_from_html).hexdigest()
 
-        # On the first run of a site, watch['previous_md5'] will be None, set it the current one.
-        if not watch.get('previous_md5'):
-            watch['previous_md5'] = fetched_md5
-            update_obj["previous_md5"] = fetched_md5
-
-        blocked_by_not_found_trigger_text = False
+        ############ Blocking rules, after checksum #################
+        blocked = False
 
         if len(watch['trigger_text']):
-            # Yeah, lets block first until something matches
-            blocked_by_not_found_trigger_text = True
+            # Assume blocked
+            blocked = True
             # Filter and trigger works the same, so reuse it
+            # It should return the line numbers that match
             result = html_tools.strip_ignore_text(content=str(stripped_text_from_html),
                                                   wordlist=watch['trigger_text'],
                                                   mode="line numbers")
-            # If it returned any lines that matched..
+            # Unblock if the trigger was found
             if result:
-                blocked_by_not_found_trigger_text = False
+                blocked = False
 
-        if not blocked_by_not_found_trigger_text and watch['previous_md5'] != fetched_md5:
+
+        if len(watch['text_should_not_be_present']):
+            # If anything matched, then we should block a change from happening
+            result = html_tools.strip_ignore_text(content=str(stripped_text_from_html),
+                                                  wordlist=watch['text_should_not_be_present'],
+                                                  mode="line numbers")
+            if result:
+                blocked = True
+
+        # The main thing that all this at the moment comes down to :)
+        if watch['previous_md5'] != fetched_md5:
             changed_detected = True
-            update_obj["previous_md5"] = fetched_md5
-            update_obj["last_changed"] = timestamp
+
+        # Looks like something changed, but did it match all the rules?
+        if blocked:
+            changed_detected = False
 
         # Extract title as title
         if is_html:
             if self.datastore.data['settings']['application']['extract_title_as_title'] or watch['extract_title_as_title']:
                 if not watch['title'] or not len(watch['title']):
                     update_obj['title'] = html_tools.extract_element(find='title', html_content=fetcher.content)
+
+        if changed_detected:
+            if watch.get('check_unique_lines', False):
+                has_unique_lines = watch.lines_contain_something_unique_compared_to_history(lines=stripped_text_from_html.splitlines())
+                # One or more lines? unsure?
+                if not has_unique_lines:
+                    logging.debug("check_unique_lines: UUID {} didnt have anything new setting change_detected=False".format(uuid))
+                    changed_detected = False
+                else:
+                    logging.debug("check_unique_lines: UUID {} had unique content".format(uuid))
+
+        # Always record the new checksum
+        update_obj["previous_md5"] = fetched_md5
+
+        # On the first run of a site, watch['previous_md5'] will be None, set it the current one.
+        if not watch.get('previous_md5'):
+            watch['previous_md5'] = fetched_md5
 
         return changed_detected, update_obj, text_content_before_ignored_filter, fetcher.screenshot, fetcher.xpath_data
