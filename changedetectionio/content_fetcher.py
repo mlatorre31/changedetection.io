@@ -303,7 +303,15 @@ class base_html_playwright(Fetcher):
             )
 
             if len(request_headers):
-                context.set_extra_http_headers(request_headers)
+                    if request_headers.get("Cookie"):
+                        cookies = json.loads(request_headers.get("Cookie"))
+                        print(cookies)
+                        context.add_cookies([cookies])
+                        request_headers.pop("Cookie")
+                        if len(request_headers):
+                            context.set_extra_http_headers(request_headers)
+                    else:
+                        context.set_extra_http_headers(request_headers)
 
             page = context.new_page()
             try:
