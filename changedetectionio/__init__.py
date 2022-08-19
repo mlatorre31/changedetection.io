@@ -44,7 +44,7 @@ from flask_wtf import CSRFProtect
 from changedetectionio import html_tools
 from changedetectionio.api import api_v1
 
-__version__ = '0.39.17.2'
+__version__ = '0.39.18'
 
 datastore = None
 
@@ -76,7 +76,7 @@ app.config['LOGIN_DISABLED'] = False
 
 # Disables caching of the templates
 app.config['TEMPLATES_AUTO_RELOAD'] = True
-
+app.jinja_env.add_extension('jinja2.ext.loopcontrols')
 csrf = CSRFProtect()
 csrf.init_app(app)
 
@@ -115,18 +115,19 @@ def _jinja2_filter_datetime(watch_obj, format="%Y-%m-%d %H:%M:%S"):
 
     return timeago.format(int(watch_obj['last_checked']), time.time())
 
-
-# @app.context_processor
-# def timeago():
-#    def _timeago(lower_time, now):
-#        return timeago.format(lower_time, now)
-#    return dict(timeago=_timeago)
-
 @app.template_filter('format_timestamp_timeago')
 def _jinja2_filter_datetimestamp(timestamp, format="%Y-%m-%d %H:%M:%S"):
+    if timestamp == False:
+        return 'Not yet'
+
     return timeago.format(timestamp, time.time())
-    # return timeago.format(timestamp, time.time())
-    # return datetime.datetime.utcfromtimestamp(timestamp).strftime(format)
+
+@app.template_filter('format_seconds_ago')
+def _jinja2_filter_seconds_precise(timestamp):
+    if timestamp == False:
+        return 'Not yet'
+
+    return format(int(time.time()-timestamp), ',d')
 
 # When nobody is logged in Flask-Login's current_user is set to an AnonymousUser object.
 class User(flask_login.UserMixin):
@@ -313,7 +314,7 @@ def changedetection_app(config=None, datastore_o=None):
                 watch['uuid'] = uuid
                 sorted_watches.append(watch)
 
-        sorted_watches.sort(key=lambda x: x['last_changed'], reverse=True)
+        sorted_watches.sort(key=lambda x: x.last_changed, reverse=False)
 
         fg = FeedGenerator()
         fg.title('changedetection.io')
@@ -332,7 +333,7 @@ def changedetection_app(config=None, datastore_o=None):
             if not watch.viewed:
                 # Re #239 - GUID needs to be individual for each event
                 # @todo In the future make this a configurable link back (see work on BASE_URL https://github.com/dgtlmoon/changedetection.io/pull/228)
-                guid = "{}/{}".format(watch['uuid'], watch['last_changed'])
+                guid = "{}/{}".format(watch['uuid'], watch.last_changed)
                 fe = fg.add_entry()
 
                 # Include a link to the diff page, they will have to login here to see if password protection is enabled.
@@ -830,7 +831,7 @@ def changedetection_app(config=None, datastore_o=None):
             previous_version_file_contents = "Unable to read {}.\n".format(previous_file)
 
 
-        screenshot_url = datastore.get_screenshot(uuid)
+        screenshot_url = watch.get_screenshot()
 
         system_uses_webdriver = datastore.data['settings']['application']['fetch_backend'] == 'html_webdriver'
 
@@ -850,7 +851,11 @@ def changedetection_app(config=None, datastore_o=None):
                                  extra_title=" - Diff - {}".format(watch['title'] if watch['title'] else watch['url']),
                                  left_sticky=True,
                                  screenshot=screenshot_url,
-                                 is_html_webdriver=is_html_webdriver)
+                                 is_html_webdriver=is_html_webdriver,
+                                 last_error=watch['last_error'],
+                                 last_error_text=watch.get_error_text(),
+                                 last_error_screenshot=watch.get_error_snapshot()
+                                 )
 
         return output
 
@@ -865,20 +870,34 @@ def changedetection_app(config=None, datastore_o=None):
         if uuid == 'first':
             uuid = list(datastore.data['watching'].keys()).pop()
 
-        # Normally you would never reach this, because the 'preview' button is not available when there's no history
-        # However they may try to clear snapshots and reload the page
-        if datastore.data['watching'][uuid].history_n == 0:
-            flash("Preview unavailable - No fetch/check completed or triggers not reached", "error")
-            return redirect(url_for('index'))
-
-        extra_stylesheets = [url_for('static_content', group='styles', filename='diff.css')]
-
         try:
             watch = datastore.data['watching'][uuid]
         except KeyError:
             flash("No history found for the specified link, bad link?", "error")
             return redirect(url_for('index'))
 
+        system_uses_webdriver = datastore.data['settings']['application']['fetch_backend'] == 'html_webdriver'
+        extra_stylesheets = [url_for('static_content', group='styles', filename='diff.css')]
+
+
+        is_html_webdriver = True if watch.get('fetch_backend') == 'html_webdriver' or (
+                watch.get('fetch_backend', None) is None and system_uses_webdriver) else False
+
+        # Never requested successfully, but we detected a fetch error
+        if datastore.data['watching'][uuid].history_n == 0 and (watch.get_error_text() or watch.get_error_snapshot()):
+            flash("Preview unavailable - No fetch/check completed or triggers not reached", "error")
+            output = render_template("preview.html",
+                                     content=content,
+                                     history_n=watch.history_n,
+                                     extra_stylesheets=extra_stylesheets,
+#                                     current_diff_url=watch['url'],
+                                     watch=watch,
+                                     uuid=uuid,
+                                     is_html_webdriver=is_html_webdriver,
+                                     last_error=watch['last_error'],
+                                     last_error_text=watch.get_error_text(),
+                                     last_error_screenshot=watch.get_error_snapshot())
+            return output
 
         timestamp = list(watch.history.keys())[-1]
         filename = watch.history[timestamp]
@@ -913,23 +932,20 @@ def changedetection_app(config=None, datastore_o=None):
         except Exception as e:
             content.append({'line': "File doesnt exist or unable to read file {}".format(filename), 'classes': ''})
 
-
-        screenshot_url = datastore.get_screenshot(uuid)
-        system_uses_webdriver = datastore.data['settings']['application']['fetch_backend'] == 'html_webdriver'
-
-        is_html_webdriver = True if watch.get('fetch_backend') == 'html_webdriver' or (
-                watch.get('fetch_backend', None) is None and system_uses_webdriver) else False
-
         output = render_template("preview.html",
                                  content=content,
+                                 history_n=watch.history_n,
                                  extra_stylesheets=extra_stylesheets,
                                  ignored_line_numbers=ignored_line_numbers,
                                  triggered_line_numbers=trigger_line_numbers,
                                  current_diff_url=watch['url'],
-                                 screenshot=screenshot_url,
+                                 screenshot=watch.get_screenshot(),
                                  watch=watch,
                                  uuid=uuid,
-                                 is_html_webdriver=is_html_webdriver)
+                                 is_html_webdriver=is_html_webdriver,
+                                 last_error=watch['last_error'],
+                                 last_error_text=watch.get_error_text(),
+                                 last_error_screenshot=watch.get_error_snapshot())
 
         return output
 
@@ -1029,11 +1045,12 @@ def changedetection_app(config=None, datastore_o=None):
             if datastore.data['settings']['application']['password'] and not flask_login.current_user.is_authenticated:
                 abort(403)
 
+            screenshot_filename = "last-screenshot.png" if not request.args.get('error_screenshot') else "last-error-screenshot.png"
+
             # These files should be in our subdirectory
             try:
                 # set nocache, set content-type
-                watch_dir = datastore_o.datastore_path + "/" + filename
-                response = make_response(send_from_directory(filename="last-screenshot.png", directory=watch_dir, path=watch_dir + "/last-screenshot.png"))
+                response = make_response(send_from_directory(os.path.join(datastore_o.datastore_path, filename), screenshot_filename))
                 response.headers['Content-type'] = 'image/png'
                 response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
                 response.headers['Pragma'] = 'no-cache'
@@ -1168,6 +1185,36 @@ def changedetection_app(config=None, datastore_o=None):
                     i += 1
         flash("{} watches are queued for rechecking.".format(i))
         return redirect(url_for('index', tag=tag))
+
+    @app.route("/form/checkbox-operations", methods=['POST'])
+    @login_required
+    def form_watch_list_checkbox_operations():
+        op = request.form['op']
+        uuids = request.form.getlist('uuids')
+
+        if (op == 'delete'):
+            for uuid in uuids:
+                uuid = uuid.strip()
+                if datastore.data['watching'].get(uuid):
+                    datastore.delete(uuid.strip())
+            flash("{} watches deleted".format(len(uuids)))
+
+        if (op == 'pause'):
+            for uuid in uuids:
+                uuid = uuid.strip()
+                if datastore.data['watching'].get(uuid):
+                    datastore.data['watching'][uuid.strip()]['paused'] = True
+
+            flash("{} watches paused".format(len(uuids)))
+
+        if (op == 'unpause'):
+            for uuid in uuids:
+                uuid = uuid.strip()
+                if datastore.data['watching'].get(uuid):
+                    datastore.data['watching'][uuid.strip()]['paused'] = False
+            flash("{} watches unpaused".format(len(uuids)))
+
+        return redirect(url_for('index'))
 
     @app.route("/api/share-url", methods=['GET'])
     @login_required
@@ -1368,13 +1415,18 @@ def ticker_thread_check_time_launch_checks():
             seconds_since_last_recheck = now - watch['last_checked']
             if seconds_since_last_recheck >= (threshold + watch.jitter_seconds) and seconds_since_last_recheck >= recheck_time_minimum_seconds:
                 if not uuid in running_uuids and uuid not in [q_uuid for p,q_uuid in update_q.queue]:
-                    print("> Queued watch UUID {} last checked at {} queued at {:0.2f} jitter {:0.2f}s, {:0.2f}s since last checked".format(uuid,
-                                                                                                         watch['last_checked'],
-                                                                                                         now,
-                                                                                                         watch.jitter_seconds,
-                                                                                                         now - watch['last_checked']))
+                    # Use Epoch time as priority, so we get a "sorted" PriorityQueue, but we can still push a priority 1 into it.
+                    priority = int(time.time())
+                    print(
+                        "> Queued watch UUID {} last checked at {} queued at {:0.2f} priority {} jitter {:0.2f}s, {:0.2f}s since last checked".format(
+                            uuid,
+                            watch['last_checked'],
+                            now,
+                            priority,
+                            watch.jitter_seconds,
+                            now - watch['last_checked']))
                     # Into the queue with you
-                    update_q.put((5, uuid))
+                    update_q.put((priority, uuid))
 
                     # Reset for next time
                     watch.jitter_seconds = 0
