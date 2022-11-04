@@ -165,16 +165,16 @@ class Fetcher():
                 }
 
 
-                // inject the current one set in the css_filter, which may be a CSS rule
+                // inject the current one set in the include_filters, which may be a CSS rule
                 // used for displaying the current one in VisualSelector, where its not one we generated.
-                if (css_filter.length) {
+                if (include_filters.length) {
                    q=false;                   
                    try {
                        // is it xpath?
-                       if (css_filter.startsWith('/') || css_filter.startsWith('xpath:')) {
-                         q=document.evaluate(css_filter.replace('xpath:',''), document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                       if (include_filters.startsWith('/') || include_filters.startsWith('xpath:')) {
+                         q=document.evaluate(include_filters.replace('xpath:',''), document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                        } else {
-                         q=document.querySelector(css_filter);
+                         q=document.querySelector(include_filters);
                        }                       
                    } catch (e) {
                     // Maybe catch DOMException and alert? 
@@ -187,7 +187,7 @@ class Fetcher():
                                    
                    if (bbox && bbox['width'] >0 && bbox['height']>0) {                       
                        size_pos.push({
-                           xpath: css_filter,
+                           xpath: include_filters,
                            width: bbox['width'], 
                            height: bbox['height'],
                            left: bbox['left'],
@@ -221,7 +221,7 @@ class Fetcher():
             request_body,
             request_method,
             ignore_status_codes=False,
-            current_css_filter=None):
+            current_include_filters=None):
         # Should set self.error, self.status_code and self.content
         pass
 
@@ -311,7 +311,7 @@ class base_html_playwright(Fetcher):
             request_body,
             request_method,
             ignore_status_codes=False,
-            current_css_filter=None):
+            current_include_filters=None):
 
         from playwright.sync_api import sync_playwright
         import playwright._impl._api_types
@@ -422,10 +422,10 @@ class base_html_playwright(Fetcher):
             self.status_code = response.status
             self.headers = response.all_headers()
 
-            if current_css_filter is not None:
-                page.evaluate("var css_filter={}".format(json.dumps(current_css_filter)))
+            if current_include_filters is not None:
+                page.evaluate("var include_filters={}".format(json.dumps(current_include_filters)))
             else:
-                page.evaluate("var css_filter=''")
+                page.evaluate("var include_filters=''")
 
             self.xpath_data = page.evaluate("async () => {" + self.xpath_element_js + "}")
 
@@ -506,7 +506,7 @@ class base_html_webdriver(Fetcher):
             request_body,
             request_method,
             ignore_status_codes=False,
-            current_css_filter=None):
+            current_include_filters=None):
 
         from selenium import webdriver
         from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
@@ -588,7 +588,7 @@ class html_requests(Fetcher):
             request_body,
             request_method,
             ignore_status_codes=False,
-            current_css_filter=None):
+            current_include_filters=None):
 
         # Make requests use a more modern looking user-agent
         if not 'User-Agent' in request_headers:

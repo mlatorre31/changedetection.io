@@ -1,14 +1,13 @@
 ## Web Site Change Detection, Monitoring and Notification.
 
-Live your data-life pro-actively, track website content changes and receive notifications via Discord, Email, Slack, Telegram and 70+ more
+_Live your data-life pro-actively, track website and JSON content changes, trigger notifications via Discord, Email, Slack, Telegram, API calls and 70+ more._
+
 
 [<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/screenshot.png" style="max-width:100%;" alt="Self-hosted web page change monitoring"  title="Self-hosted web page change monitoring"  />](https://lemonade.changedetection.io/start?src=github)
 
 [![Release Version][release-shield]][release-link] [![Docker Pulls][docker-pulls]][docker-link] [![License][license-shield]](LICENSE.md)
 
 ![changedetection.io](https://github.com/dgtlmoon/changedetection.io/actions/workflows/test-only.yml/badge.svg?branch=master)
-
-Know when important content changes, we support notifications via Discord, Telegram, Home-Assistant, Slack, Email and 70+ more
 
 [**Don't have time? Let us host it for you! try our $6.99/month subscription - use our proxies and support!**](https://lemonade.changedetection.io/start) , _half the price of other website change monitoring services and comes with unlimited watches & checks!_
 
@@ -167,9 +166,6 @@ One big advantage of `jq` is that you can use logic in your JSON filter, such as
 
 See the wiki https://github.com/dgtlmoon/changedetection.io/wiki/JSON-Selector-Filter-help for more information and examples
 
-Note: `jq` library must be added separately (`pip3 install jq`)
-
-
 ### Parse JSON embedded in HTML!
 
 When you enable a `json:` or `jq:` filter, you can even automatically extract and parse embedded JSON inside a HTML page! Amazingly handy for sites that build content based on JSON, such as many e-commerce websites. 
@@ -184,9 +180,9 @@ When you enable a `json:` or `jq:` filter, you can even automatically extract an
 
 `json:$.price` or `jq:.price` would give `23.50`, or you can extract the whole structure
 
-## Proxy configuration
+## Proxy Configuration
 
-See the wiki https://github.com/dgtlmoon/changedetection.io/wiki/Proxy-configuration
+See the wiki https://github.com/dgtlmoon/changedetection.io/wiki/Proxy-configuration , we also support using [BrightData proxy services where possible]( https://github.com/dgtlmoon/changedetection.io/wiki/Proxy-configuration#brightdata-proxy-support)
 
 ## Raspberry Pi support?
 
