@@ -5,12 +5,7 @@ import json
 import os
 import requests
 import sys
-<<<<<<< HEAD
-import json
-
-=======
 import time
->>>>>>> 68d51783670ca9ad97d1b551b41fd42e66de5600
 
 class Non200ErrorCodeReceived(Exception):
     def __init__(self, status_code, url, screenshot=None, xpath_data=None, page_html=None):
