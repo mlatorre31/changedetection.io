@@ -74,6 +74,7 @@ class update_worker(threading.Thread):
             n_object.update({
                 'watch_url': watch['url'],
                 'uuid': watch_uuid,
+                'screenshot': watch.get_screenshot_as_jpeg() if watch.get('notification_screenshot') else None,
                 'current_snapshot': snapshot_contents.decode('utf-8'),
                 'diff': diff.render_diff(watch_history[dates[-2]], watch_history[dates[-1]], line_feed_sep=line_feed_sep),
                 'diff_full': diff.render_diff(watch_history[dates[-2]], watch_history[dates[-1]], True, line_feed_sep=line_feed_sep)
@@ -106,7 +107,8 @@ class update_worker(threading.Thread):
         if 'notification_urls' in n_object:
             n_object.update({
                 'watch_url': watch['url'],
-                'uuid': watch_uuid
+                'uuid': watch_uuid,
+                'screenshot': None
             })
             self.notification_q.put(n_object)
             print("Sent filter not found notification for {}".format(watch_uuid))
@@ -282,16 +284,19 @@ class update_worker(threading.Thread):
                             self.app.logger.error("Exception reached processing watch UUID: %s - %s", uuid, str(e))
                             self.datastore.update_watch(uuid=uuid, update_obj={'last_error': str(e)})
 
+                    if self.datastore.data['watching'].get(uuid):
+                        # Always record that we atleast tried
+                        count = self.datastore.data['watching'][uuid].get('check_count', 0) + 1
+                        self.datastore.update_watch(uuid=uuid, update_obj={'fetch_time': round(time.time() - now, 3),
+                                                                           'last_checked': round(time.time()),
+                                                                           'check_count': count
+                                                                           })
 
-                    # Always record that we atleast tried
-                    self.datastore.update_watch(uuid=uuid, update_obj={'fetch_time': round(time.time() - now, 3),
-                                                                       'last_checked': round(time.time())})
-
-                    # Always save the screenshot if it's available
-                    if update_handler.screenshot:
-                        self.datastore.save_screenshot(watch_uuid=uuid, screenshot=update_handler.screenshot)
-                    if update_handler.xpath_data:
-                        self.datastore.save_xpath_data(watch_uuid=uuid, data=update_handler.xpath_data)
+                        # Always save the screenshot if it's available
+                        if update_handler.screenshot:
+                            self.datastore.save_screenshot(watch_uuid=uuid, screenshot=update_handler.screenshot)
+                        if update_handler.xpath_data:
+                            self.datastore.save_xpath_data(watch_uuid=uuid, data=update_handler.xpath_data)
 
 
                 self.current_uuid = None  # Done

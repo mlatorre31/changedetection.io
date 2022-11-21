@@ -1,6 +1,6 @@
 ## Web Site Change Detection, Monitoring and Notification.
 
-_Live your data-life pro-actively, track website and JSON content changes, trigger notifications via Discord, Email, Slack, Telegram, API calls and 70+ more._
+_Live your data-life pro-actively, Detect website changes and perform meaningful actions, trigger notifications via Discord, Email, Slack, Telegram, API calls and many more._
 
 
 [<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/screenshot.png" style="max-width:100%;" alt="Self-hosted web page change monitoring"  title="Self-hosted web page change monitoring"  />](https://lemonade.changedetection.io/start?src=github)
@@ -40,6 +40,8 @@ Easily see what changed, examine by word, line, or individual character.
 - Create RSS feeds based on changes in web content
 - Monitor HTML source code for unexpected changes, strengthen your PCI compliance
 - You have a very sensitive list of URLs to watch and you do _not_ want to use the paid alternatives. (Remember, _you_ are the product)
+- Get notified when certain keywords appear in Twitter search results
+- Proactively search for jobs, get notified when companies update their careers page, search job portals for keywords.
 
 _Need an actual Chrome runner with Javascript support? We support fetching via WebDriver and Playwright!</a>_
 
@@ -53,6 +55,7 @@ _Need an actual Chrome runner with Javascript support? We support fetching via W
 - Override Request Headers, Specify `POST` or `GET` and other methods
 - Use the "Visual Selector" to help target specific elements
 - Configurable [proxy per watch](https://github.com/dgtlmoon/changedetection.io/wiki/Proxy-configuration)
+- Send a screenshot with the notification when a change is detected in the web page
 
 We [recommend and use Bright Data](https://brightdata.grsm.io/n0r16zf7eivq) global proxy services, Bright Data will match any first deposit up to $100 using our signup link.
 

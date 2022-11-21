@@ -13,7 +13,7 @@ $(document).ready(function() {
     // redline highlight context
     var ctx;
 
-    var current_default_xpath;
+    var current_default_xpath=[];
     var x_scale=1;
     var y_scale=1;
     var selector_image;
@@ -57,21 +57,24 @@ $(document).ready(function() {
     bootstrap_visualselector();
 
 
-
     function bootstrap_visualselector() {
-        if ( 1 ) {
+        if (1) {
             // bootstrap it, this will trigger everything else
             $("img#selector-background").bind('load', function () {
                 console.log("Loaded background...");
-               c = document.getElementById("selector-canvas");
+                c = document.getElementById("selector-canvas");
                 // greyed out fill context
-               xctx = c.getContext("2d");
+                xctx = c.getContext("2d");
                 // redline highlight context
-               ctx = c.getContext("2d");
-               current_default_xpath =$("#include_filters").val();
-               fetch_data();
-               $('#selector-canvas').off("mousemove mousedown");
-               // screenshot_url defined in the edit.html template
+                ctx = c.getContext("2d");
+                if ($("#include_filters").val().trim().length) {
+                    current_default_xpath = $("#include_filters").val().split(/\r?\n/g);
+                } else {
+                    current_default_xpath = [];
+                }
+                fetch_data();
+                $('#selector-canvas').off("mousemove mousedown");
+                // screenshot_url defined in the edit.html template
             }).attr("src", screenshot_url);
         }
     }
@@ -127,24 +130,30 @@ $(document).ready(function() {
 
       console.log(selector_data['size_pos'].length + " selectors found");
 
-      // highlight the default one if we can find it in the xPath list
-      // or the xpath matches the default one
-      found = false;
-      if(current_default_xpath.length) {
-          for (var i = selector_data['size_pos'].length; i!==0; i--) {
-            var sel = selector_data['size_pos'][i-1];
-            if(selector_data['size_pos'][i - 1].xpath == current_default_xpath) {
-            console.log("highlighting "+current_default_xpath);
-              current_selected_i = i-1;
-              highlight_current_selected_i();
-              found = true;
-              break;
+        // highlight the default one if we can find it in the xPath list
+        // or the xpath matches the default one
+        found = false;
+        if (current_default_xpath.length) {
+            // Find the first one that matches
+            // @todo In the future paint all that match
+            for (const c of current_default_xpath) {
+                for (var i = selector_data['size_pos'].length; i !== 0; i--) {
+                    if (selector_data['size_pos'][i - 1].xpath === c) {
+                        console.log("highlighting " + c);
+                        current_selected_i = i - 1;
+                        highlight_current_selected_i();
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) {
+                    break;
+                }
             }
-          }
-        if(!found) {
-          alert("Unfortunately your existing CSS/xPath Filter was no longer found!");
+            if (!found) {
+                alert("Unfortunately your existing CSS/xPath Filter was no longer found!");
+            }
         }
-      }
 
 
       $('#selector-canvas').bind('mousemove', function (e) {
