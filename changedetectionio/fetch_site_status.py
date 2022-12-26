@@ -1,16 +1,22 @@
 import hashlib
+import json
 import logging
 import os
 import re
-import time
 import urllib3
 
 from changedetectionio import content_fetcher, html_tools
+from changedetectionio.blueprint.price_data_follower import PRICE_DATA_TRACK_ACCEPT, PRICE_DATA_TRACK_REJECT
+from copy import deepcopy
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class FilterNotFoundInResponse(ValueError):
+    def __init__(self, msg):
+        ValueError.__init__(self, msg)
+
+class PDFToHTMLToolNotFound(ValueError):
     def __init__(self, msg):
         ValueError.__init__(self, msg)
 
@@ -38,8 +44,7 @@ class perform_site_check():
 
         return regex
 
-    def run(self, uuid):
-        from copy import deepcopy
+    def run(self, uuid, skip_when_checksum_same=True):
         changed_detected = False
         screenshot = False  # as bytes
         stripped_text_from_html = ""
@@ -86,7 +91,7 @@ class perform_site_check():
             is_source = True
 
         # Pluggable content fetcher
-        prefer_backend = watch.get('fetch_backend')
+        prefer_backend = watch.get_fetch_backend
         if hasattr(content_fetcher, prefer_backend):
             klass = getattr(content_fetcher, prefer_backend)
         else:
@@ -108,14 +113,33 @@ class perform_site_check():
         elif system_webdriver_delay is not None:
             fetcher.render_extract_delay = system_webdriver_delay
 
+        # Possible conflict
+        if prefer_backend == 'html_webdriver':
+            fetcher.browser_steps = watch.get('browser_steps', None)
+            fetcher.browser_steps_screenshot_path = os.path.join(self.datastore.datastore_path, uuid)
+
         if watch.get('webdriver_js_execute_code') is not None and watch.get('webdriver_js_execute_code').strip():
             fetcher.webdriver_js_execute_code = watch.get('webdriver_js_execute_code')
 
-        fetcher.run(url, timeout, request_headers, request_body, request_method, ignore_status_codes, watch.get('include_filters'))
+        # requests for PDF's, images etc should be passwd the is_binary flag
+        is_binary = watch.is_pdf
+
+        fetcher.run(url, timeout, request_headers, request_body, request_method, ignore_status_codes, watch.get('include_filters'), is_binary=is_binary)
         fetcher.quit()
 
         self.screenshot = fetcher.screenshot
         self.xpath_data = fetcher.xpath_data
+
+        # Track the content type
+        update_obj['content_type'] = fetcher.headers.get('Content-Type', '')
+
+        # Watches added automatically in the queue manager will skip if its the same checksum as the previous run
+        # Saves a lot of CPU
+        update_obj['previous_md5_before_filters'] = hashlib.md5(fetcher.content.encode('utf-8')).hexdigest()
+        if skip_when_checksum_same:
+            if update_obj['previous_md5_before_filters'] == watch.get('previous_md5_before_filters'):
+                raise content_fetcher.checksumFromPreviousCheckWasTheSame()
+
 
         # Fetching complete, now filters
         # @todo move to class / maybe inside of fetcher abstract base?
@@ -135,13 +159,42 @@ class perform_site_check():
             is_html = False
             is_json = False
 
-        include_filters_rule = watch.get('include_filters', [])
+        if watch.is_pdf or 'application/pdf' in fetcher.headers.get('Content-Type', '').lower():
+            from shutil import which
+            tool = os.getenv("PDF_TO_HTML_TOOL", "pdftohtml")
+            if not which(tool):
+                raise PDFToHTMLToolNotFound("Command-line `{}` tool was not found in system PATH, was it installed?".format(tool))
+
+            import subprocess
+            proc = subprocess.Popen(
+                [tool, '-stdout', '-', '-s', 'out.pdf', '-i'],
+                stdout=subprocess.PIPE,
+                stdin=subprocess.PIPE)
+            proc.stdin.write(fetcher.raw_content)
+            proc.stdin.close()
+            fetcher.content = proc.stdout.read().decode('utf-8')
+            proc.wait(timeout=60)
+
+            # Add a little metadata so we know if the file changes (like if an image changes, but the text is the same
+            # @todo may cause problems with non-UTF8?
+            metadata = "<p>Added by changedetection.io: Document checksum - {} Filesize - {} bytes</p>".format(
+                hashlib.md5(fetcher.raw_content).hexdigest().upper(),
+                len(fetcher.content))
+
+            fetcher.content = fetcher.content.replace('</body>', metadata + '</body>')
+
+
+        include_filters_rule = deepcopy(watch.get('include_filters', []))
         # include_filters_rule = watch['include_filters']
         subtractive_selectors = watch.get(
             "subtractive_selectors", []
         ) + self.datastore.data["settings"]["application"].get(
             "global_subtractive_selectors", []
         )
+
+        # Inject a virtual LD+JSON price tracker rule
+        if watch.get('track_ldjson_price_data', '') == PRICE_DATA_TRACK_ACCEPT:
+            include_filters_rule.append(html_tools.LD_JSON_PRODUCT_OFFER_SELECTOR)
 
         has_filter_rule = include_filters_rule and len("".join(include_filters_rule).strip())
         has_subtractive_selectors = subtractive_selectors and len(subtractive_selectors[0].strip())
@@ -150,12 +203,22 @@ class perform_site_check():
             include_filters_rule.append("json:$")
             has_filter_rule = True
 
+        if is_json:
+            # Sort the JSON so we dont get false alerts when the content is just re-ordered
+            try:
+                fetcher.content = json.dumps(json.loads(fetcher.content), sort_keys=True)
+            except Exception as e:
+                # Might have just been a snippet, or otherwise bad JSON, continue
+                pass
+
         if has_filter_rule:
             json_filter_prefixes = ['json:', 'jq:']
             for filter in include_filters_rule:
                 if any(prefix in filter for prefix in json_filter_prefixes):
                     stripped_text_from_html += html_tools.extract_json_as_string(content=fetcher.content, json_filter=filter)
                     is_html = False
+
+
 
         if is_html or is_source:
 
@@ -168,9 +231,13 @@ class perform_site_check():
                 # Don't run get_text or xpath/css filters on plaintext
                 stripped_text_from_html = html_content
             else:
+                # Does it have some ld+json price data? used for easier monitoring
+                update_obj['has_ldjson_price_data'] = html_tools.has_ldjson_product_info(fetcher.content)
+
                 # Then we assume HTML
                 if has_filter_rule:
                     html_content = ""
+
                     for filter_rule in include_filters_rule:
                         # For HTML/XML we offer xpath as an option, just start a regular xPath "/.."
                         if filter_rule[0] == '/' or filter_rule.startswith('xpath:'):

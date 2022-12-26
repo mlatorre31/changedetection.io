@@ -36,7 +36,6 @@ class ChangeDetectionStore:
         self.datastore_path = datastore_path
         self.json_store_path = "{}/url-watches.json".format(self.datastore_path)
         self.needs_write = False
-        self.proxy_list = None
         self.start_time = time.time()
         self.stop_thread = False
         # Base definition for all watchers
@@ -115,11 +114,6 @@ class ChangeDetectionStore:
         if not 'api_access_token' in self.__data['settings']['application']:
             secret = secrets.token_hex(16)
             self.__data['settings']['application']['api_access_token'] = secret
-
-        # Proxy list support - available as a selection in settings when text file is imported
-        proxy_list_file = "{}/proxies.json".format(self.datastore_path)
-        if path.isfile(proxy_list_file):
-            self.import_proxy_list(proxy_list_file)
 
         # Bump the update version by running updates
         self.run_updates()
@@ -250,12 +244,15 @@ class ChangeDetectionStore:
     def clear_watch_history(self, uuid):
         import pathlib
 
-        self.__data['watching'][uuid].update(
-            {'last_checked': 0,
-             'last_viewed': 0,
-             'previous_md5': False,
-             'last_notification_error': False,
-             'last_error': False})
+        self.__data['watching'][uuid].update({
+                'last_checked': 0,
+                'has_ldjson_price_data': None,
+                'last_error': False,
+                'last_notification_error': False,
+                'last_viewed': 0,
+                'previous_md5': False,
+                'track_ldjson_price_data': None,
+            })
 
         # JSON Data, Screenshots, Textfiles (history index and snapshots), HTML in the future etc
         for item in pathlib.Path(os.path.join(self.datastore_path, uuid)).rglob("*.*"):
@@ -289,6 +286,7 @@ class ChangeDetectionStore:
                 # List of permissible attributes we accept from the wild internet
                 for k in [
                     'body',
+                    'browser_steps',
                     'css_filter',
                     'extract_text',
                     'extract_title_as_title',
@@ -303,8 +301,8 @@ class ChangeDetectionStore:
                     'text_should_not_be_present',
                     'title',
                     'trigger_text',
-                    'webdriver_js_execute_code',
                     'url',
+                    'webdriver_js_execute_code',
                 ]:
                     if res.get(k):
                         if k != 'css_filter':
@@ -459,10 +457,30 @@ class ChangeDetectionStore:
                     print ("Removing",item)
                     unlink(item)
 
-    def import_proxy_list(self, filename):
-        with open(filename) as f:
-            self.proxy_list = json.load(f)
-            print ("Registered proxy list", list(self.proxy_list.keys()))
+    @property
+    def proxy_list(self):
+        proxy_list = {}
+        proxy_list_file = os.path.join(self.datastore_path, 'proxies.json')
+
+        # Load from external config file
+        if path.isfile(proxy_list_file):
+            with open("{}/proxies.json".format(self.datastore_path)) as f:
+                proxy_list = json.load(f)
+
+        # Mapping from UI config if available
+        extras = self.data['settings']['requests'].get('extra_proxies')
+        if extras:
+            i=0
+            for proxy in extras:
+                i += 0
+                if proxy.get('proxy_name') and proxy.get('proxy_url'):
+                    k = "ui-" + str(i) + proxy.get('proxy_name')
+                    proxy_list[k] = {'label': proxy.get('proxy_name'), 'url': proxy.get('proxy_url')}
+
+
+        return proxy_list if len(proxy_list) else None
+
+
 
 
     def get_preferred_proxy_for_watch(self, uuid):
@@ -472,11 +490,10 @@ class ChangeDetectionStore:
         :return: proxy "key" id
         """
 
-        proxy_id = None
         if self.proxy_list is None:
             return None
 
-        # If its a valid one
+        # If it's a valid one
         watch = self.data['watching'].get(uuid)
 
         if watch.get('proxy') and watch.get('proxy') in list(self.proxy_list.keys()):
@@ -489,8 +506,9 @@ class ChangeDetectionStore:
             if self.proxy_list.get(system_proxy_id):
                 return system_proxy_id
 
-        # Fallback - Did not resolve anything, use the first available
-        if system_proxy_id is None:
+
+        # Fallback - Did not resolve anything, or doesnt exist, use the first available
+        if system_proxy_id is None or not self.proxy_list.get(system_proxy_id):
             first_default = list(self.proxy_list)[0]
             return first_default
 
@@ -620,4 +638,44 @@ class ChangeDetectionStore:
                     watch['include_filters'] = [existing_filter]
             except:
                 continue
+        return
+
+    # Convert old static notification tokens to jinja2 tokens
+    def update_9(self):
+        # Each watch
+        import re
+        # only { } not {{ or }}
+        r = r'(?<!{){(?!{)(\w+)(?<!})}(?!})'
+        for uuid, watch in self.data['watching'].items():
+            try:
+                n_body = watch.get('notification_body', '')
+                if n_body:
+                    watch['notification_body'] = re.sub(r, r'{{\1}}', n_body)
+
+                n_title = watch.get('notification_title')
+                if n_title:
+                    watch['notification_title'] = re.sub(r, r'{{\1}}', n_title)
+
+                n_urls = watch.get('notification_urls')
+                if n_urls:
+                    for i, url in enumerate(n_urls):
+                        watch['notification_urls'][i] = re.sub(r, r'{{\1}}', url)
+
+            except:
+                continue
+
+        # System wide
+        n_body = self.data['settings']['application'].get('notification_body')
+        if n_body:
+            self.data['settings']['application']['notification_body'] = re.sub(r, r'{{\1}}', n_body)
+
+        n_title = self.data['settings']['application'].get('notification_title')
+        if n_body:
+            self.data['settings']['application']['notification_title'] = re.sub(r, r'{{\1}}', n_title)
+
+        n_urls =  self.data['settings']['application'].get('notification_urls')
+        if n_urls:
+            for i, url in enumerate(n_urls):
+                self.data['settings']['application']['notification_urls'][i] = re.sub(r, r'{{\1}}', url)
+
         return

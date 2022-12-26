@@ -1,8 +1,7 @@
 import os
 import time
-import re
 from flask import url_for
-from .util import set_original_response, live_server_setup
+from .util import set_original_response, live_server_setup, extract_UUID_from_client
 from changedetectionio.model import App
 
 
@@ -56,17 +55,17 @@ def run_filter_test(client, content_filter):
 
     # Just a regular notification setting, this will be used by the special 'filter not found' notification
     notification_form_data = {"notification_urls": notification_url,
-                              "notification_title": "New ChangeDetection.io Notification - {watch_url}",
-                              "notification_body": "BASE URL: {base_url}\n"
-                                                   "Watch URL: {watch_url}\n"
-                                                   "Watch UUID: {watch_uuid}\n"
-                                                   "Watch title: {watch_title}\n"
-                                                   "Watch tag: {watch_tag}\n"
-                                                   "Preview: {preview_url}\n"
-                                                   "Diff URL: {diff_url}\n"
-                                                   "Snapshot: {current_snapshot}\n"
-                                                   "Diff: {diff}\n"
-                                                   "Diff Full: {diff_full}\n"
+                              "notification_title": "New ChangeDetection.io Notification - {{watch_url}}",
+                              "notification_body": "BASE URL: {{base_url}}\n"
+                                                   "Watch URL: {{watch_url}}\n"
+                                                   "Watch UUID: {{watch_uuid}}\n"
+                                                   "Watch title: {{watch_title}}\n"
+                                                   "Watch tag: {{watch_tag}}\n"
+                                                   "Preview: {{preview_url}}\n"
+                                                   "Diff URL: {{diff_url}}\n"
+                                                   "Snapshot: {{current_snapshot}}\n"
+                                                   "Diff: {{diff}}\n"
+                                                   "Diff Full: {{diff_full}}\n"
                                                    ":-)",
                               "notification_format": "Text"}
 
@@ -84,6 +83,7 @@ def run_filter_test(client, content_filter):
         data=notification_form_data,
         follow_redirects=True
     )
+
     assert b"Updated watch." in res.data
     time.sleep(3)
 
@@ -119,6 +119,10 @@ def run_filter_test(client, content_filter):
     with open("test-datastore/notification.txt", 'r') as f:
         notification = f.read()
     assert not 'CSS/xPath filter was not present in the page' in notification
+
+    # Re #1247 - All tokens got replaced
+    uuid = extract_UUID_from_client(client)
+    assert uuid in notification
 
     # cleanup for the next
     client.get(

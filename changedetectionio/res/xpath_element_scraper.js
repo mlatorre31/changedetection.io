@@ -1,8 +1,18 @@
+// Copyright (C) 2021 Leigh Morresi (dgtlmoon@gmail.com)
+// All rights reserved.
+
+// @file Scrape the page looking for elements of concern (%ELEMENTS%)
+// http://matatk.agrip.org.uk/tests/position-and-width/
+// https://stackoverflow.com/questions/26813480/when-is-element-getboundingclientrect-guaranteed-to-be-updated-accurate
+//
+// Some pages like https://www.londonstockexchange.com/stock/NCCL/ncondezi-energy-limited/analysis
+// will automatically force a scroll somewhere, so include the position offset
+// Lets hope the position doesnt change while we iterate the bbox's, but this is better than nothing
+
+var scroll_y=+document.documentElement.scrollTop || document.body.scrollTop
+
 // Include the getXpath script directly, easier than fetching
-!function (e, n) {
-    "object" == typeof exports && "undefined" != typeof module ? module.exports = n() : "function" == typeof define && define.amd ? define(n) : (e = e || self).getXPath = n()
-}(this, function () {
-    return function (e) {
+function getxpath(e) {
         var n = e;
         if (n && n.id) return '//*[@id="' + n.id + '"]';
         for (var o = []; n && Node.ELEMENT_NODE === n.nodeType;) {
@@ -18,15 +28,30 @@
         }
         return o.length ? "/" + o.reverse().join("/") : ""
     }
-});
-
 
 const findUpTag = (el) => {
     let r = el
     chained_css = [];
     depth = 0;
 
-// Strategy 1: Keep going up until we hit an ID tag, imagine it's like  #list-widget div h4
+    //  Strategy 1: If it's an input, with name, and there's only one, prefer that
+    if (el.name !== undefined && el.name.length) {
+        var proposed = el.tagName + "[name=" + el.name + "]";
+        var proposed_element = window.document.querySelectorAll(proposed);
+        if(proposed_element.length) {
+            if (proposed_element.length === 1) {
+                return proposed;
+            } else {
+                // Some sites change ID but name= stays the same, we can hit it if we know the index
+                // Find all the elements that match and work out the input[n]
+                var n=Array.from(proposed_element).indexOf(el);
+                // Return a Playwright selector for nthinput[name=zipcode]
+                return proposed+" >> nth="+n;
+            }
+        }
+    }
+
+    // Strategy 2: Keep going up until we hit an ID tag, imagine it's like  #list-widget div h4
     while (r.parentNode) {
         if (depth == 5) {
             break;
@@ -50,7 +75,8 @@ const findUpTag = (el) => {
 
 
 // @todo - if it's SVG or IMG, go into image diff mode
-var elements = window.document.querySelectorAll("div,span,form,table,tbody,tr,td,a,p,ul,li,h1,h2,h3,h4, header, footer, section, article, aside, details, main, nav, section, summary");
+// %ELEMENTS% replaced at injection time because different interfaces use it with different settings
+var elements = window.document.querySelectorAll("%ELEMENTS%");
 var size_pos = [];
 // after page fetch, inject this JS
 // build a map of all elements and their positions (maybe that only include text?)
@@ -58,8 +84,21 @@ var bbox;
 for (var i = 0; i < elements.length; i++) {
     bbox = elements[i].getBoundingClientRect();
 
-    // forget really small ones
-    if (bbox['width'] < 15 && bbox['height'] < 15) {
+    // Exclude items that are not interactable or visible
+    if(elements[i].style.opacity === "0") {
+        continue
+    }
+    if(elements[i].style.display === "none" || elements[i].style.pointerEvents === "none" ) {
+        continue
+    }
+
+    // Skip really small ones, and where width or height ==0
+    if (bbox['width'] * bbox['height'] < 100) {
+        continue;
+    }
+
+    // Don't include elements that are offset from canvas
+    if (bbox['top']+scroll_y < 0 || bbox['left'] < 0) {
         continue;
     }
 
@@ -85,7 +124,7 @@ for (var i = 0; i < elements.length; i++) {
         try {
             // I've seen on FB and eBay that this doesnt work
             // ReferenceError: getXPath is not defined at eval (eval at evaluate (:152:29), <anonymous>:67:20) at UtilityScript.evaluate (<anonymous>:159:18) at UtilityScript.<anonymous> (<anonymous>:1:44)
-            xpath_result = getXPath(elements[i]);
+            xpath_result = getxpath(elements[i]);
         } catch (e) {
             console.log(e);
             continue;
@@ -96,15 +135,19 @@ for (var i = 0; i < elements.length; i++) {
         continue;
     }
 
+    // @todo Possible to ONLY list where it's clickable to save JSON xfer size
     size_pos.push({
         xpath: xpath_result,
         width: Math.round(bbox['width']),
         height: Math.round(bbox['height']),
         left: Math.floor(bbox['left']),
-        top: Math.floor(bbox['top'])
+        top: Math.floor(bbox['top'])+scroll_y,
+        tagName: (elements[i].tagName) ? elements[i].tagName.toLowerCase() : '',
+        tagtype: (elements[i].tagName == 'INPUT' && elements[i].type) ? elements[i].type.toLowerCase() : '',
+        isClickable: (elements[i].onclick) || window.getComputedStyle(elements[i]).cursor == "pointer"
     });
-}
 
+}
 
 // Inject the current one set in the include_filters, which may be a CSS rule
 // used for displaying the current one in VisualSelector, where its not one we generated.
@@ -133,22 +176,40 @@ if (include_filters.length) {
         }
 
         if (q) {
-            bbox = q.getBoundingClientRect();
-        } else {
-            console.log("xpath_element_scraper: filter element "+f+" was not found");
+            // #1231 - IN the case XPath attribute filter is applied, we will have to traverse up and find the element.
+            if (q.hasOwnProperty('getBoundingClientRect')) {
+                bbox = q.getBoundingClientRect();
+                console.log("xpath_element_scraper: Got filter element, scroll from top was " + scroll_y)
+            } else {
+                try {
+                    // Try and see we can find its ownerElement
+                    bbox = q.ownerElement.getBoundingClientRect();
+                    console.log("xpath_element_scraper: Got filter by ownerElement element, scroll from top was " + scroll_y)
+                } catch (e) {
+                    console.log("xpath_element_scraper: error looking up ownerElement")
+                }
+            }
+        }
+        
+        if(!q) {
+            console.log("xpath_element_scraper: filter element " + f + " was not found");
         }
 
         if (bbox && bbox['width'] > 0 && bbox['height'] > 0) {
             size_pos.push({
                 xpath: f,
-                width: Math.round(bbox['width']),
-                height: Math.round(bbox['height']),
-                left: Math.floor(bbox['left']),
-                top: Math.floor(bbox['top'])
+                width: parseInt(bbox['width']),
+                height: parseInt(bbox['height']),
+                left: parseInt(bbox['left']),
+                top: parseInt(bbox['top'])+scroll_y
             });
         }
     }
 }
+
+// Sort the elements so we find the smallest one first, in other words, we find the smallest one matching in that area
+// so that we dont select the wrapping element by mistake and be unable to select what we want
+size_pos.sort((a, b) => (a.width*a.height > b.width*b.height) ? 1 : -1)
 
 // Window.width required for proper scaling in the frontend
 return {'size_pos': size_pos, 'browser_width': window.innerWidth};

@@ -14,49 +14,52 @@ from changedetectionio.notification import (
 
 class model(dict):
     __newest_history_key = None
-    __history_n=0
+    __history_n = 0
     __base_config = {
-            #'history': {},  # Dict of timestamp and output stripped filename (removed)
-            #'newest_history_key': 0, (removed, taken from history.txt index)
-            'body': None,
-            'check_unique_lines': False, # On change-detected, compare against all history if its something new
-            'check_count': 0,
-            'consecutive_filter_failures': 0, # Every time the CSS/xPath filter cannot be located, reset when all is fine.
-            'extract_text': [],  # Extract text by regex after filters
-            'extract_title_as_title': False,
-            'fetch_backend': None,
-            'filter_failure_notification_send': strtobool(os.getenv('FILTER_FAILURE_NOTIFICATION_SEND_DEFAULT', 'True')),
-            'headers': {},  # Extra headers to send
-            'ignore_text': [],  # List of text to ignore when calculating the comparison checksum
-            'include_filters': [],
-            'last_checked': 0,
-            'last_error': False,
-            'last_viewed': 0,  # history key value of the last viewed via the [diff] link
-            'method': 'GET',
-             # Custom notification content
-            'notification_body': None,
-            'notification_format': default_notification_format_for_watch,
-            'notification_muted': False,
-            'notification_title': None,
-            'notification_screenshot': False, # Include the latest screenshot if available and supported by the apprise URL
-            'notification_urls': [],  # List of URLs to add to the notification Queue (Usually AppRise)
-            'paused': False,
-            'previous_md5': False,
-            'proxy': None, # Preferred proxy connection
-            'subtractive_selectors': [],
-            'tag': None,
-            'text_should_not_be_present': [], # Text that should not present
-            # Re #110, so then if this is set to None, we know to use the default value instead
-            # Requires setting to None on submit if it's the same as the default
-            # Should be all None by default, so we use the system default in this case.
-            'time_between_check': {'weeks': None, 'days': None, 'hours': None, 'minutes': None, 'seconds': None},
-            'title': None,
-            'trigger_text': [],  # List of text or regex to wait for until a change is detected
-            'url': None,
-            'uuid': str(uuid.uuid4()),
-            'webdriver_delay': None,
-            'webdriver_js_execute_code': None, # Run before change-detection
-        }
+        # 'history': {},  # Dict of timestamp and output stripped filename (removed)
+        # 'newest_history_key': 0, (removed, taken from history.txt index)
+        'body': None,
+        'check_unique_lines': False,  # On change-detected, compare against all history if its something new
+        'check_count': 0,
+        'consecutive_filter_failures': 0,  # Every time the CSS/xPath filter cannot be located, reset when all is fine.
+        'extract_text': [],  # Extract text by regex after filters
+        'extract_title_as_title': False,
+        'fetch_backend': None,
+        'filter_failure_notification_send': strtobool(os.getenv('FILTER_FAILURE_NOTIFICATION_SEND_DEFAULT', 'True')),
+        'has_ldjson_price_data': None,
+        'track_ldjson_price_data': None,
+        'headers': {},  # Extra headers to send
+        'ignore_text': [],  # List of text to ignore when calculating the comparison checksum
+        'include_filters': [],
+        'last_checked': 0,
+        'last_error': False,
+        'last_viewed': 0,  # history key value of the last viewed via the [diff] link
+        'method': 'GET',
+        # Custom notification content
+        'notification_body': None,
+        'notification_format': default_notification_format_for_watch,
+        'notification_muted': False,
+        'notification_title': None,
+        'notification_screenshot': False,  # Include the latest screenshot if available and supported by the apprise URL
+        'notification_urls': [],  # List of URLs to add to the notification Queue (Usually AppRise)
+        'paused': False,
+        'previous_md5': False,
+        'previous_md5_before_filters': False,  # Used for skipping changedetection entirely
+        'proxy': None,  # Preferred proxy connection
+        'subtractive_selectors': [],
+        'tag': None,
+        'text_should_not_be_present': [],  # Text that should not present
+        # Re #110, so then if this is set to None, we know to use the default value instead
+        # Requires setting to None on submit if it's the same as the default
+        # Should be all None by default, so we use the system default in this case.
+        'time_between_check': {'weeks': None, 'days': None, 'hours': None, 'minutes': None, 'seconds': None},
+        'title': None,
+        'trigger_text': [],  # List of text or regex to wait for until a change is detected
+        'url': None,
+        'uuid': str(uuid.uuid4()),
+        'webdriver_delay': None,
+        'webdriver_js_execute_code': None,  # Run before change-detection
+    }
     jitter_seconds = 0
 
     def __init__(self, *arg, **kw):
@@ -93,12 +96,41 @@ class model(dict):
     @property
     def link(self):
         url = self.get('url', '')
+        ready_url = url
         if '{%' in url or '{{' in url:
             from jinja2 import Environment
             # Jinja2 available in URLs along with https://pypi.org/project/jinja2-time/
             jinja2_env = Environment(extensions=['jinja2_time.TimeExtension'])
-            return str(jinja2_env.from_string(url).render())
-        return url
+            try:
+                ready_url = str(jinja2_env.from_string(url).render())
+            except Exception as e:
+                from flask import (
+                    flash, Markup, url_for
+                )
+                message = Markup('<a href="{}#general">The URL {} is invalid and cannot be used, click to edit</a>'.format(
+                    url_for('edit_page', uuid=self.get('uuid')), self.get('url', '')))
+                flash(message, 'error')
+                return ''
+
+        return ready_url
+
+    @property
+    def get_fetch_backend(self):
+        """
+        Like just using the `fetch_backend` key but there could be some logic
+        :return:
+        """
+        # Maybe also if is_image etc?
+        # This is because chrome/playwright wont render the PDF in the browser and we will just fetch it and use pdf2html to see the text.
+        if self.is_pdf:
+            return 'html_requests'
+
+        return self.get('fetch_backend')
+
+    @property
+    def is_pdf(self):
+        # content_type field is set in the future
+        return '.pdf' in self.get('url', '').lower() or 'pdf' in self.get('content_type', '').lower()
 
     @property
     def label(self):
@@ -307,3 +339,47 @@ class model(dict):
         if os.path.isfile(fname):
             return fname
         return False
+
+    def extract_regex_from_all_history(self, regex):
+        import csv
+        import re
+        import datetime
+        csv_output_filename = False
+        csv_writer = False
+        f = None
+
+        # self.history will be keyed with the full path
+        for k, fname in self.history.items():
+            if os.path.isfile(fname):
+                with open(fname, "r") as f:
+                    contents = f.read()
+                    res = re.findall(regex, contents, re.MULTILINE)
+                    if res:
+                        if not csv_writer:
+                            # A file on the disk can be transferred much faster via flask than a string reply
+                            csv_output_filename = 'report.csv'
+                            f = open(os.path.join(self.watch_data_dir, csv_output_filename), 'w')
+                            # @todo some headers in the future
+                            #fieldnames = ['Epoch seconds', 'Date']
+                            csv_writer = csv.writer(f,
+                                                    delimiter=',',
+                                                    quotechar='"',
+                                                    quoting=csv.QUOTE_MINIMAL,
+                                                    #fieldnames=fieldnames
+                                                    )
+                            csv_writer.writerow(['Epoch seconds', 'Date'])
+                            # csv_writer.writeheader()
+
+                        date_str = datetime.datetime.fromtimestamp(int(k)).strftime('%Y-%m-%d %H:%M:%S')
+                        for r in res:
+                            row = [k, date_str]
+                            if isinstance(r, str):
+                                row.append(r)
+                            else:
+                                row+=r
+                            csv_writer.writerow(row)
+
+        if f:
+            f.close()
+
+        return csv_output_filename

@@ -13,18 +13,37 @@ _Live your data-life pro-actively, Detect website changes and perform meaningful
 
 - Chrome browser included.
 - Super fast, no registration needed setup.
-- Start watching and receiving change notifications instantly.
+- Get started watching and receiving website change notifications straight away.
 
 
-Easily see what changed, examine by word, line, or individual character.
+### Target specific parts of the webpage using the Visual Selector tool.
 
-<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/screenshot-diff.png" style="max-width:100%;" alt="Self-hosted web page change monitoring context difference "  title="Self-hosted web page change monitoring context difference " />
+Available when connected to a <a href="https://github.com/dgtlmoon/changedetection.io/wiki/Playwright-content-fetcher">playwright content fetcher</a> (included as part of our subscription service)
+
+[<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/visualselector-anim.gif" style="max-width:100%;" alt="Self-hosted web page change monitoring context difference "  title="Self-hosted web page change monitoring context difference " />](https://lemonade.changedetection.io/start?src=github)
+
+### Easily see what changed, examine by word, line, or individual character.
+
+[<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/screenshot-diff.png" style="max-width:100%;" alt="Self-hosted web page change monitoring context difference "  title="Self-hosted web page change monitoring context difference " />](https://lemonade.changedetection.io/start?src=github)
 
 
-#### Example use cases
+### Perform interactive browser steps
+
+Fill in text boxes, click buttons and more, setup your changedetection scenario. 
+
+Using the **Browser Steps** configuration, add basic steps before performing change detection, such as logging into websites, adding a product to a cart, accept cookie logins, entering dates and refining searches.
+
+[<img src="docs/browsersteps-anim.gif" style="max-width:100%;" alt="Self-hosted web page change monitoring context difference "  title="Website change detection with interactive browser steps, login, cookies etc" />](https://lemonade.changedetection.io/start?src=github)
+
+After **Browser Steps** have been run, then visit the **Visual Selector** tab to refine the content you're interested in.
+Requires Playwright to be enabled.
+
+
+### Example use cases
 
 - Products and services have a change in pricing
 - _Out of stock notification_ and _Back In stock notification_
+- Monitor and track PDF file changes, know when a PDF file has text changes.
 - Governmental department updates (changes are often only on their websites)
 - New software releases, security advisories when you're not on their mailing list.
 - Festivals with changes
@@ -50,6 +69,7 @@ _Need an actual Chrome runner with Javascript support? We support fetching via W
 - Lots of trigger filters, such as "Trigger on text", "Remove text by selector", "Ignore text", "Extract text", also using regular-expressions!
 - Target elements with xPath and CSS Selectors, Easily monitor complex JSON with JSONPath or jq
 - Switch between fast non-JS and Chrome JS based "fetchers"
+- Track changes in PDF files (Monitor text changed in the PDF, Also monitor PDF filesize and checksums)
 - Easily specify how often a site should be checked
 - Execute JS before extracting text (Good for logging in, see examples in the UI!)
 - Override Request Headers, Specify `POST` or `GET` and other methods
@@ -59,15 +79,7 @@ _Need an actual Chrome runner with Javascript support? We support fetching via W
 
 We [recommend and use Bright Data](https://brightdata.grsm.io/n0r16zf7eivq) global proxy services, Bright Data will match any first deposit up to $100 using our signup link.
 
-## Screenshots
-
 Please :star: star :star: this project and help it grow! https://github.com/dgtlmoon/changedetection.io/
-
-### Filter by elements using the Visual Selector tool.
-
-Available when connected to a <a href="https://github.com/dgtlmoon/changedetection.io/wiki/Playwright-content-fetcher">playwright content fetcher</a> (included as part of our subscription service)
-
-<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/visualselector-anim.gif" style="max-width:100%;" alt="Self-hosted web page change monitoring context difference "  title="Self-hosted web page change monitoring context difference " />
 
 ## Installation
 
@@ -149,7 +161,7 @@ Just some examples
 
 <img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/screenshot-notifications.png" style="max-width:100%;" alt="Self-hosted web page change monitoring notifications"  title="Self-hosted web page change monitoring notifications"  />
 
-Now you can also customise your notification content!
+Now you can also customise your notification content and use <a target="_new" href="https://jinja.palletsprojects.com/en/3.0.x/templates/">Jinja2 templating</a> for their title and body!
 
 ## JSON API Monitoring
 
@@ -177,11 +189,29 @@ When you enable a `json:` or `jq:` filter, you can even automatically extract an
 <html>
 ...
 <script type="application/ld+json">
-  {"@context":"http://schema.org","@type":"Product","name":"Nan Optipro Stage 1 Baby Formula  800g","price": 23.50 }
+
+{
+   "@context":"http://schema.org/",
+   "@type":"Product",
+   "offers":{
+      "@type":"Offer",
+      "availability":"http://schema.org/InStock",
+      "price":"3949.99",
+      "priceCurrency":"USD",
+      "url":"https://www.newegg.com/p/3D5-000D-001T1"
+   },
+   "description":"Cobratype King Cobra Hero Desktop Gaming PC",
+   "name":"Cobratype King Cobra Hero Desktop Gaming PC",
+   "sku":"3D5-000D-001T1",
+   "itemCondition":"NewCondition"
+}
 </script>
 ```  
 
-`json:$.price` or `jq:.price` would give `23.50`, or you can extract the whole structure
+`json:$..price` or `jq:..price` would give `3949.99`, or you can extract the whole structure (use a JSONpath test website to validate with)
+
+The application also supports notifying you that it can follow this information automatically
+
 
 ## Proxy Configuration
 
