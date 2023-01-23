@@ -36,7 +36,7 @@ from flask_wtf import CSRFProtect
 from changedetectionio import html_tools
 from changedetectionio.api import api_v1
 
-__version__ = '0.40.0.4'
+__version__ = '0.40.1.1'
 
 datastore = None
 
@@ -379,9 +379,9 @@ def changedetection_app(config=None, datastore_o=None):
         if op:
             uuid = request.args.get('uuid')
             if op == 'pause':
-                datastore.data['watching'][uuid]['paused'] ^= True
+                datastore.data['watching'][uuid].toggle_pause()
             elif op == 'mute':
-                datastore.data['watching'][uuid]['notification_muted'] ^= True
+                datastore.data['watching'][uuid].toggle_mute()
 
             datastore.needs_write = True
             return redirect(url_for('index', tag = limit_tag))
@@ -571,6 +571,8 @@ def changedetection_app(config=None, datastore_o=None):
                                data=default,
                                )
 
+        form.fetch_backend.choices.append(("system", 'System settings default'))
+
         # form.browser_steps[0] can be assumed that we 'goto url' first
 
         if datastore.proxy_list is None:
@@ -598,10 +600,6 @@ def changedetection_app(config=None, datastore_o=None):
                     extra_update_obj['time_between_check'] = form.time_between_check.data
                     using_default_check_time = False
                     break
-
-            # Use the default if it's the same as system-wide.
-            if form.fetch_backend.data == datastore.data['settings']['application']['fetch_backend']:
-                extra_update_obj['fetch_backend'] = None
 
 
 
@@ -652,8 +650,10 @@ def changedetection_app(config=None, datastore_o=None):
 
             watch = datastore.data['watching'].get(uuid)
             system_uses_webdriver = datastore.data['settings']['application']['fetch_backend'] == 'html_webdriver'
-            is_html_webdriver = True if watch.get('fetch_backend') == 'html_webdriver' or (
-                    watch.get('fetch_backend', None) is None and system_uses_webdriver) else False
+
+            is_html_webdriver = False
+            if (watch.get('fetch_backend') == 'system' and system_uses_webdriver) or watch.get('fetch_backend') == 'html_webdriver':
+                is_html_webdriver = True
 
             output = render_template("edit.html",
                                      browser_steps_config=browser_step_ui_config,
@@ -1218,7 +1218,7 @@ def changedetection_app(config=None, datastore_o=None):
                 if watch_uuid not in running_uuids and not datastore.data['watching'][watch_uuid]['paused']:
                     update_q.put(queuedWatchMetaData.PrioritizedItem(priority=1, item={'uuid': watch_uuid, 'skip_when_checksum_same': False}))
                     i += 1
-        flash("{} watches are queued for rechecking.".format(i))
+        flash("{} watches queued for rechecking.".format(i))
         return redirect(url_for('index', tag=tag))
 
     @app.route("/form/checkbox-operations", methods=['POST'])
@@ -1239,7 +1239,6 @@ def changedetection_app(config=None, datastore_o=None):
                 uuid = uuid.strip()
                 if datastore.data['watching'].get(uuid):
                     datastore.data['watching'][uuid.strip()]['paused'] = True
-
             flash("{} watches paused".format(len(uuids)))
 
         elif (op == 'unpause'):
@@ -1269,8 +1268,8 @@ def changedetection_app(config=None, datastore_o=None):
                 if datastore.data['watching'].get(uuid):
                     # Recheck and require a full reprocessing
                     update_q.put(queuedWatchMetaData.PrioritizedItem(priority=1, item={'uuid': uuid, 'skip_when_checksum_same': False}))
+            flash("{} watches queued for rechecking".format(len(uuids)))
 
-            flash("{} watches un-muted".format(len(uuids)))
         elif (op == 'notification-default'):
             from changedetectionio.notification import (
                 default_notification_format_for_watch

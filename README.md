@@ -1,6 +1,8 @@
 ## Web Site Change Detection, Monitoring and Notification.
 
-_Live your data-life pro-actively, Detect website changes and perform meaningful actions, trigger notifications via Discord, Email, Slack, Telegram, API calls and many more._
+**_Detect website content changes and perform meaningful actions - trigger notifications via Discord, Email, Slack, Telegram, API calls and many more._**
+
+_Live your data-life pro-actively._ 
 
 
 [<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/screenshot.png" style="max-width:100%;" alt="Self-hosted web page change monitoring"  title="Self-hosted web page change monitoring"  />](https://lemonade.changedetection.io/start?src=github)
@@ -9,7 +11,7 @@ _Live your data-life pro-actively, Detect website changes and perform meaningful
 
 ![changedetection.io](https://github.com/dgtlmoon/changedetection.io/actions/workflows/test-only.yml/badge.svg?branch=master)
 
-[**Don't have time? Let us host it for you! try our $6.99/month subscription - use our proxies and support!**](https://lemonade.changedetection.io/start) , _half the price of other website change monitoring services and comes with unlimited watches & checks!_
+[**Don't have time? Let us host it for you! try our $8.99/month subscription - use our proxies and support!**](https://lemonade.changedetection.io/start) , _half the price of other website change monitoring services and comes with unlimited watches & checks!_
 
 - Chrome browser included.
 - Super fast, no registration needed setup.
@@ -221,6 +223,9 @@ See the wiki https://github.com/dgtlmoon/changedetection.io/wiki/Proxy-configura
 
 Raspberry Pi and linux/arm/v6 linux/arm/v7 arm64 devices are supported! See the wiki for [details](https://github.com/dgtlmoon/changedetection.io/wiki/Fetching-pages-with-WebDriver)
 
+## API Support
+
+Supports managing the website watch list [via our API](https://changedetection.io/docs/api_v1/index.html)
 
 ## Support us
 
@@ -245,5 +250,5 @@ I offer commercial support, this software is depended on by network security, ae
 [test-shield]: https://github.com/dgtlmoon/changedetection.io/actions/workflows/test-only.yml/badge.svg?branch=master
 
 [license-shield]: https://img.shields.io/github/license/dgtlmoon/changedetection.io.svg?style=for-the-badge
-[release-link]: https://github.com/dgtlmoon.com/changedetection.io/releases
+[release-link]: https://github.com/dgtlmoon/changedetection.io/releases
 [docker-link]: https://hub.docker.com/r/dgtlmoon/changedetection.io

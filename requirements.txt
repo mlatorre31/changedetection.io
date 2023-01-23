@@ -1,14 +1,15 @@
-flask~=2.0
-flask_wtf
-flask-compress
 eventlet>=0.31.0
-validators
-timeago~=1.0
-inscriptis~=2.2
 feedgen~=0.9
+flask-compress
 flask-login~=0.5
+flask_expects_json~=1.7
 flask_restful
+flask_wtf
+flask~=2.0
+inscriptis~=2.2
 pytz
+timeago~=1.0
+validators
 
 # Set these versions together to avoid a RequestsDependencyWarning
 # >= 2.26 also adds Brotli support if brotli is installed
@@ -21,10 +22,16 @@ chardet>2.3.0
 wtforms~=3.0
 jsonpath-ng~=1.5.3
 
+
+# dnspython 2.3.0 is not compatible with eventlet
+# * https://github.com/eventlet/eventlet/issues/781
+# * https://datastax-oss.atlassian.net/browse/PYTHON-1320
+dnspython<2.3.0
+
 # jq not available on Windows so must be installed manually
 
 # Notification library
-apprise~=1.2.0
+apprise~=1.2.1
 
 # apprise mqtt https://github.com/dgtlmoon/changedetection.io/issues/315
 paho-mqtt
