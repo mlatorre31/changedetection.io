@@ -10,11 +10,13 @@ on:
     paths:
       - requirements.txt
       - Dockerfile
+      - .github/workflows/*
 
   pull_request:
     paths:
       - requirements.txt
       - Dockerfile
+      - .github/workflows/*
 
   # Changes to requirements.txt packages and Dockerfile may or may not always be compatible with arm etc, so worth testing
   # @todo: some kind of path filter for requirements.txt and Dockerfile
@@ -60,7 +62,7 @@ jobs:
           with:
             context: ./
             file: ./Dockerfile
-            platforms: linux/arm/v7,linux/arm/v6,linux/amd64,linux/arm64,
+            platforms: linux/amd64,linux/arm64,
             cache-from: type=local,src=/tmp/.buildx-cache
             cache-to: type=local,dest=/tmp/.buildx-cache
 

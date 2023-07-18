@@ -2,28 +2,33 @@
 {% block content %}
 {% from '_helpers.jinja' import render_field, render_checkbox_field, render_button %}
 {% from '_common_fields.jinja' import render_common_settings_form %}
-<script type="text/javascript" src="{{url_for('static_content', group='js', filename='tabs.js')}}" defer></script>
+<script src="{{url_for('static_content', group='js', filename='tabs.js')}}" defer></script>
 <script>
-    const notification_base_url="{{url_for('ajax_callback_send_notification_test')}}";
-    const watch_visual_selector_data_url="{{url_for('static_content', group='visual_selector_data', filename=uuid)}}";
-    const screenshot_url="{{url_for('static_content', group='screenshot', filename=uuid)}}";
-    const playwright_enabled={% if playwright_enabled %} true {% else %} false {% endif %};
 
+    const browser_steps_config=JSON.parse('{{ browser_steps_config|tojson }}');
+    const browser_steps_start_url="{{url_for('browser_steps.browsersteps_start_session', uuid=uuid)}}";
+    const browser_steps_sync_url="{{url_for('browser_steps.browsersteps_ui_update', uuid=uuid)}}";
 {% if emailprefix %}
     const email_notification_prefix=JSON.parse('{{ emailprefix|tojson }}');
 {% endif %}
+    const notification_base_url="{{url_for('ajax_callback_send_notification_test')}}";
+    const playwright_enabled={% if playwright_enabled %} true {% else %} false {% endif %};
+    const recheck_proxy_start_url="{{url_for('check_proxies.start_check', uuid=uuid)}}";
+    const proxy_recheck_status_url="{{url_for('check_proxies.get_recheck_status', uuid=uuid)}}";
+    const screenshot_url="{{url_for('static_content', group='screenshot', filename=uuid)}}";
+    const watch_visual_selector_data_url="{{url_for('static_content', group='visual_selector_data', filename=uuid)}}";
 
-    const browser_steps_config=JSON.parse('{{ browser_steps_config|tojson }}');
-    const browser_steps_sync_url="{{url_for('browser_steps.browsersteps_ui_update', uuid=uuid)}}";
 </script>
 
-<script type="text/javascript" src="{{url_for('static_content', group='js', filename='watch-settings.js')}}" defer></script>
-<script type="text/javascript" src="{{url_for('static_content', group='js', filename='limit.js')}}" defer></script>
-<script type="text/javascript" src="{{url_for('static_content', group='js', filename='notifications.js')}}" defer></script>
-<script type="text/javascript" src="{{url_for('static_content', group='js', filename='visual-selector.js')}}" defer></script>
+<script src="{{url_for('static_content', group='js', filename='watch-settings.js')}}" defer></script>
+<script src="{{url_for('static_content', group='js', filename='limit.js')}}" defer></script>
+<script src="{{url_for('static_content', group='js', filename='notifications.js')}}" defer></script>
+<script src="{{url_for('static_content', group='js', filename='visual-selector.js')}}" defer></script>
 {% if playwright_enabled %}
-<script type="text/javascript" src="{{url_for('static_content', group='js', filename='browser-steps.js')}}" defer></script>
+<script src="{{url_for('static_content', group='js', filename='browser-steps.js')}}" defer></script>
 {% endif %}
+
+<script src="{{url_for('static_content', group='js', filename='recheck-proxy.js')}}" defer></script>
 
 <div class="edit-form monospaced-textarea">
 
@@ -34,8 +39,15 @@
             {% if playwright_enabled %}
             <li class="tab"><a id="browsersteps-tab" href="#browser-steps">Browser Steps</a></li>
             {% endif %}
+
+            {% if watch['processor'] == 'text_json_diff' %}
             <li class="tab"><a id="visualselector-tab" href="#visualselector">Visual Filter Selector</a></li>
             <li class="tab"><a href="#filters-and-triggers">Filters &amp; Triggers</a></li>
+            {% endif %}
+
+            {% if watch['processor'] == 'restock_diff' %}
+            <li class="tab"><a href="#restock">Restock Detection</a></li>
+            {% endif %}
             <li class="tab"><a href="#notifications">Notifications</a></li>
         </ul>
     </div>
@@ -43,20 +55,30 @@
     <div class="box-wrap inner">
         <form class="pure-form pure-form-stacked"
               action="{{ url_for('edit_page', uuid=uuid, next = request.args.get('next'), unpause_on_save = request.args.get('unpause_on_save')) }}" method="POST">
-             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
             <div class="tab-pane-inner" id="general">
                 <fieldset>
                     <div class="pure-control-group">
                         {{ render_field(form.url, placeholder="https://...", required=true, class="m-d") }}
-                        <span class="pure-form-message-inline">Some sites use JavaScript to create the content, for this you should <a href="https://github.com/dgtlmoon/changedetection.io/wiki/Fetching-pages-with-WebDriver">use the Chrome/WebDriver Fetcher</a></span><br/>
-                        <span class="pure-form-message-inline">You can use variables in the URL, perfect for inserting the current date and other logic, <a href="https://github.com/dgtlmoon/changedetection.io/wiki/Handling-variables-in-the-watched-URL">help and examples here</a></span><br/>
+                        <span class="pure-form-message-inline">Some sites use JavaScript to create the content, for this you should <a href="https://github.com/dgtlmoon/changedetection.io/wiki/Fetching-pages-with-WebDriver">use the Chrome/WebDriver Fetcher</a></span><br>
+                        <span class="pure-form-message-inline">You can use variables in the URL, perfect for inserting the current date and other logic, <a href="https://github.com/dgtlmoon/changedetection.io/wiki/Handling-variables-in-the-watched-URL">help and examples here</a></span><br>
+                        <span class="pure-form-message-inline">
+                        {% if watch['processor'] == 'text_json_diff' %}
+                            Current mode: <strong>Webpage Text/HTML, JSON and PDF changes.</strong><br>
+                          <a href="{{url_for('edit_page', uuid=uuid)}}?switch_processor=restock_diff" class="pure-button button-xsmall">Switch to re-stock detection mode.</a>
+                        {% else %}
+                        Current mode: <strong>Re-stock detection.</strong><br>
+                          <a href="{{url_for('edit_page', uuid=uuid)}}?switch_processor=text_json_diff" class="pure-button button-xsmall">Switch to Webpage Text/HTML, JSON and PDF changes mode.</a>
+                        {% endif %}
+                        </span>
+
                     </div>
                     <div class="pure-control-group">
                         {{ render_field(form.title, class="m-d") }}
                     </div>
                     <div class="pure-control-group">
-                        {{ render_field(form.tag) }}
+                        {{ render_field(form.tags) }}
                         <span class="pure-form-message-inline">Organisational tag/group name used in the main listing page</span>
                     </div>
                     <div class="pure-control-group">
@@ -92,7 +114,8 @@
                     </div>
                 {% if form.proxy %}
                     <div class="pure-control-group inline-radio">
-                        {{ render_field(form.proxy, class="fetch-backend-proxy") }}
+                          <div>{{ form.proxy.label }} <a href="" id="check-all-proxies" class="pure-button button-secondary button-xsmall" >Check/Scan all</a></div>
+                          <div>{{ form.proxy(class="fetch-backend-proxy") }}</div>
                         <span class="pure-form-message-inline">
                         Choose a proxy for this watch
                         </span>
@@ -106,10 +129,10 @@
                         {{ render_field(form.webdriver_delay) }}
                         <div class="pure-form-message-inline">
                             <strong>If you're having trouble waiting for the page to be fully rendered (text missing etc), try increasing the 'wait' time here.</strong>
-                            <br/>
+                            <br>
                             This will wait <i>n</i> seconds before extracting the text.
                             {% if using_global_webdriver_wait %}
-                            <br/><strong>Using the current global default settings</strong>
+                            <br><strong>Using the current global default settings</strong>
                             {% endif %}
                         </div>
                     </div>
@@ -133,6 +156,17 @@
 {{ render_field(form.headers, rows=5, placeholder="Example
 Cookie: foobar
 User-Agent: wonderbra 1.0") }}
+
+                        <div class="pure-form-message-inline">
+                            {% if has_extra_headers_file %}
+                                <strong>Alert! Extra headers file found and will be added to this watch!</strong>
+                            {% else %}
+                                Headers can be also read from a file in your data-directory <a href="https://github.com/dgtlmoon/changedetection.io/wiki/Adding-headers-from-an-external-file">Read more here</a>
+                            {% endif %}
+                            <br>
+                            (Not supported by Selenium browser)
+                        </div>
+
                     </div>
                     <div class="pure-control-group" id="request-body">
                                         {{ render_field(form.body, rows=5, placeholder="Example
@@ -146,7 +180,7 @@ User-Agent: wonderbra 1.0") }}
             </div>
             {% if playwright_enabled %}
             <div class="tab-pane-inner" id="browser-steps">
-                <img class="beta-logo" src="{{url_for('static_content', group='images', filename='beta-logo.png')}}">
+                <img class="beta-logo" src="{{url_for('static_content', group='images', filename='beta-logo.png')}}" alt="New beta functionality">
                 <fieldset>
                     <div class="pure-control-group">
                         <!--
@@ -169,11 +203,12 @@ User-Agent: wonderbra 1.0") }}
                                     <span class="loader" >
                                         <span id="browsersteps-click-start">
                                             <h2 >Click here to Start</h2>
-                                            Please allow 10-15 seconds for the browser to connect.
+                                            <svg style="height: 3.5rem;" version="1.1" viewBox="0 0 32 32"  xml:space="preserve" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><g id="Layer_1"/><g id="play_x5F_alt"><path d="M16,0C7.164,0,0,7.164,0,16s7.164,16,16,16s16-7.164,16-16S24.836,0,16,0z M10,24V8l16.008,8L10,24z" style="fill: var(--color-grey-400);"/></g></svg><br>
+                                            Please allow 10-15 seconds for the browser to connect.<br>
                                         </span>
                                         <div class="spinner"  style="display: none;"></div>
                                     </span>
-                                    <img  class="noselect" id="browsersteps-img" src="" style="max-width: 100%; width: 100%;" />
+                                    <img class="noselect" id="browsersteps-img" src="" style="max-width: 100%; width: 100%;" >
                                     <canvas  class="noselect" id="browsersteps-selector-canvas" style="max-width: 100%; width: 100%;"></canvas>
                                 </div>
                             </div>
@@ -203,7 +238,7 @@ User-Agent: wonderbra 1.0") }}
                     <div class="field-group" id="notification-field-group">
                         {% if has_default_notification_urls %}
                         <div class="inline-warning">
-                            <img class="inline-warning-icon" src="{{url_for('static_content', group='images', filename='notice.svg')}}" alt="Look out!" title="Lookout!"/>
+                            <img class="inline-warning-icon" src="{{url_for('static_content', group='images', filename='notice.svg')}}" alt="Look out!" title="Lookout!" >
                             There are <a href="{{ url_for('settings_page')}}#notifications">system-wide notification URLs enabled</a>, this form will override notification settings for this watch only &dash; an empty Notification URL list here will still send notifications.
                         </div>
                         {% endif %}
@@ -214,9 +249,10 @@ User-Agent: wonderbra 1.0") }}
                 </fieldset>
             </div>
 
+            {% if watch['processor'] == 'text_json_diff' %}
             <div class="tab-pane-inner" id="filters-and-triggers">
                     <div class="pure-control-group">
-                            <strong>Pro-tips:</strong><br/>
+                            <strong>Pro-tips:</strong><br>
                             <ul>
                                 <li>
                                     Use the preview page to see your filters and triggers highlighted.
@@ -226,12 +262,6 @@ User-Agent: wonderbra 1.0") }}
                                 </li>
                             </ul>
                     </div>
-                    <fieldset>
-                        <div class="pure-control-group">
-                            {{ render_checkbox_field(form.check_unique_lines) }}
-                            <span class="pure-form-message-inline">Good for websites that just move the content around, and you want to know when NEW content is added, compares new lines against all history for this watch.</span>
-                        </div>
-                    </fieldset>
                     <div class="pure-control-group">
                         {% set field = render_field(form.include_filters,
                             rows=5,
@@ -241,9 +271,9 @@ xpath://body/div/span[contains(@class, 'example-class')]",
                         %}
                         {{ field }}
                         {% if '/text()' in  field %}
-                          <span class="pure-form-message-inline"><strong>Note!: //text() function does not work where the &lt;element&gt; contains &lt;![CDATA[]]&gt;</strong></span><br/>
+                          <span class="pure-form-message-inline"><strong>Note!: //text() function does not work where the &lt;element&gt; contains &lt;![CDATA[]]&gt;</strong></span><br>
                         {% endif %}
-                        <span class="pure-form-message-inline">One rule per line, <i>any</i> rules that matches will be used.<br/>
+                        <span class="pure-form-message-inline">One rule per line, <i>any</i> rules that matches will be used.<br>
 
                     <ul>
                         <li>CSS - Limit text to this CSS rule, only text matching this CSS rule is included.</li>
@@ -266,40 +296,42 @@ xpath://body/div/span[contains(@class, 'example-class')]",
                             </li>
                     </ul>
                     Please be sure that you thoroughly understand how to write CSS, JSONPath, XPath{% if jq_support %}, or jq selector{%endif%} rules before filing an issue on GitHub! <a
-                                href="https://github.com/dgtlmoon/changedetection.io/wiki/CSS-Selector-help">here for more CSS selector help</a>.<br/>
+                                href="https://github.com/dgtlmoon/changedetection.io/wiki/CSS-Selector-help">here for more CSS selector help</a>.<br>
                 </span>
                     </div>
-                    <div class="pure-control-group">
-                      {{ render_field(form.subtractive_selectors, rows=5, placeholder="header
+                <fieldset class="pure-control-group">
+                    {{ render_field(form.subtractive_selectors, rows=5, placeholder="header
 footer
 nav
 .stockticker") }}
-                      <span class="pure-form-message-inline">
+                    <span class="pure-form-message-inline">
                         <ul>
                           <li> Remove HTML element(s) by CSS selector before text conversion. </li>
                           <li> Add multiple elements or CSS selectors per line to ignore multiple parts of the HTML. </li>
                         </ul>
                       </span>
-                    </div>
-                <fieldset class="pure-group">
-                    {{ render_field(form.ignore_text, rows=5, placeholder="Some text to ignore in a line
-/some.regex\d{2}/ for case-INsensitive regex
-                    ") }}
-                    <span class="pure-form-message-inline">
-                        <ul>
-                            <li>Each line processed separately, any line matching will be ignored (removed before creating the checksum)</li>
-                            <li>Regular Expression support, wrap the entire line in forward slash <code>/regex/</code></li>
-                            <li>Changing this will affect the comparison checksum which may trigger an alert</li>
-                            <li>Use the preview/show current tab to see ignores</li>
-                        </ul>
-                </span>
+                </fieldset>
+                <div class="text-filtering">
+                <fieldset class="pure-group" id="text-filtering-type-options">
+                    <h3>Text filtering</h3>
+                        Limit trigger/ignore/block/extract to;<br>
+                        {{ render_checkbox_field(form.filter_text_added) }}
+                        {{ render_checkbox_field(form.filter_text_replaced) }}
+                        {{ render_checkbox_field(form.filter_text_removed) }}
+                    <span class="pure-form-message-inline">Note: Depending on the length and similarity of the text on each line, the algorithm may consider an <strong>addition</strong> instead of <strong>replacement</strong> for example.</span>
+                    <span class="pure-form-message-inline">So it's always better to select <strong>Added</strong>+<strong>Replaced</strong> when you're interested in new content.</span><br>
+                    <span class="pure-form-message-inline">When content is merely moved in a list, it will also trigger an <strong>addition</strong>, consider enabling <code><strong>Only trigger when unique lines appear</strong></code></span>
+                </fieldset>
 
-            </fieldset>
+                <fieldset class="pure-control-group">
+                    {{ render_checkbox_field(form.check_unique_lines) }}
+                    <span class="pure-form-message-inline">Good for websites that just move the content around, and you want to know when NEW content is added, compares new lines against all history for this watch.</span>
+                </fieldset>
                 <fieldset>
                     <div class="pure-control-group">
                         {{ render_field(form.trigger_text, rows=5, placeholder="Some text to wait for in a line
 /some.regex\d{2}/ for case-INsensitive regex
-                    ") }}
+") }}
                         <span class="pure-form-message-inline">
                     <ul>
                         <li>Text to wait for before triggering a change/notification, all text and regex are tested <i>case-insensitive</i>.</li>
@@ -310,6 +342,21 @@ nav
                         </span>
                     </div>
                 </fieldset>
+                <fieldset class="pure-group">
+                    {{ render_field(form.ignore_text, rows=5, placeholder="Some text to ignore in a line
+/some.regex\d{2}/ for case-INsensitive regex
+") }}
+                    <span class="pure-form-message-inline">
+                        <ul>
+                            <li>Each line processed separately, any line matching will be ignored (removed before creating the checksum)</li>
+                            <li>Regular Expression support, wrap the entire line in forward slash <code>/regex/</code></li>
+                            <li>Changing this will affect the comparison checksum which may trigger an alert</li>
+                            <li>Use the preview/show current tab to see ignores</li>
+                        </ul>
+                </span>
+
+                </fieldset>
+
                 <fieldset>
                     <div class="pure-control-group">
                         {{ render_field(form.text_should_not_be_present, rows=5, placeholder="For example: Out of stock
@@ -334,7 +381,7 @@ Unavailable") }}
                         <li>Extracts text in the final output (line by line) after other filters using regular expressions;
                             <ul>
                                 <li>Regular expression &dash; example <code>/reports.+?2022/i</code></li>
-                                <li>Use <code>//(?aiLmsux))</code> type flags (more <a href="https://docs.python.org/3/library/re.html#index-15">information here</a>)<br/></li>
+                                <li>Use <code>//(?aiLmsux))</code> type flags (more <a href="https://docs.python.org/3/library/re.html#index-15">information here</a>)<br></li>
                                 <li>Keyword example &dash; example <code>Out of stock</code></li>
                                 <li>Use groups to extract just that text &dash; example <code>/reports.+?(\d+)/i</code> returns a list of years only</li>
                             </ul>
@@ -344,16 +391,30 @@ Unavailable") }}
                         </span>
                     </div>
                 </fieldset>
+                </div>
             </div>
+            {% endif %}
 
+            {% if watch['processor'] == 'restock_diff' %}
+            <div class="tab-pane-inner" id="restock">
+                    <fieldset>
+                        <div class="pure-control-group">
+                            {{ render_checkbox_field(form.in_stock_only) }}
+                            <span class="pure-form-message-inline">Only trigger notifications when page changes from <strong>out of stock</strong> to <strong>back in stock</strong></span>
+                        </div>
+                    </fieldset>
+            </div>
+            {% endif %}
+
+            {% if watch['processor'] == 'text_json_diff' %}
             <div class="tab-pane-inner visual-selector-ui" id="visualselector">
-                <img class="beta-logo" src="{{url_for('static_content', group='images', filename='beta-logo.png')}}">
+                <img class="beta-logo" src="{{url_for('static_content', group='images', filename='beta-logo.png')}}" alt="New beta functionality">
 
                 <fieldset>
                     <div class="pure-control-group">
                         {% if visualselector_enabled %}
                             <span class="pure-form-message-inline">
-                                The Visual Selector tool lets you select the <i>text</i> elements that will be used for the change detection &dash; after the <i>Browser Steps</i> has completed.<br/><br/>
+                                The Visual Selector tool lets you select the <i>text</i> elements that will be used for the change detection &dash; after the <i>Browser Steps</i> has completed.<br><br>
                             </span>
 
                             <div id="selector-header">
@@ -364,7 +425,7 @@ Unavailable") }}
                                 <!-- request the screenshot and get the element offset info ready -->
                                 <!-- use img src ready load to know everything is ready to map out -->
                                 <!-- @todo: maybe something interesting like a field to select 'elements that contain text... and their parents n' -->
-                                <img id="selector-background" />
+                                <img id="selector-background" >
                                 <canvas id="selector-canvas"></canvas>
                             </div>
                             <div id="selector-current-xpath" style="overflow-x: hidden"><strong>Currently:</strong>&nbsp;<span class="text">Loading...</span></div>
@@ -378,6 +439,7 @@ Unavailable") }}
                     </div>
                 </fieldset>
             </div>
+            {% endif %}
 
             <div id="actions">
                 <div class="pure-control-group">

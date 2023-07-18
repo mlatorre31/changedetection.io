@@ -1,17 +1,17 @@
-## Web Site Change Detection, Monitoring and Notification.
+## Web Site Change Detection, Restock monitoring and notifications.
 
 **_Detect website content changes and perform meaningful actions - trigger notifications via Discord, Email, Slack, Telegram, API calls and many more._**
 
 _Live your data-life pro-actively._ 
 
 
-[<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/screenshot.png" style="max-width:100%;" alt="Self-hosted web page change monitoring"  title="Self-hosted web page change monitoring"  />](https://lemonade.changedetection.io/start?src=github)
+[<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/screenshot.png" style="max-width:100%;" alt="Self-hosted web page change monitoring"  title="Self-hosted web page change monitoring"  />](https://changedetection.io?src=github)
 
 [![Release Version][release-shield]][release-link] [![Docker Pulls][docker-pulls]][docker-link] [![License][license-shield]](LICENSE.md)
 
 ![changedetection.io](https://github.com/dgtlmoon/changedetection.io/actions/workflows/test-only.yml/badge.svg?branch=master)
 
-[**Don't have time? Let us host it for you! try our $8.99/month subscription - use our proxies and support!**](https://lemonade.changedetection.io/start) , _half the price of other website change monitoring services and comes with unlimited watches & checks!_
+[**Don't have time? Let us host it for you! try our $8.99/month subscription - use our proxies and support!**](https://changedetection.io) , _half the price of other website change monitoring services!_
 
 - Chrome browser included.
 - Super fast, no registration needed setup.
@@ -22,11 +22,11 @@ _Live your data-life pro-actively._
 
 Available when connected to a <a href="https://github.com/dgtlmoon/changedetection.io/wiki/Playwright-content-fetcher">playwright content fetcher</a> (included as part of our subscription service)
 
-[<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/visualselector-anim.gif" style="max-width:100%;" alt="Self-hosted web page change monitoring context difference "  title="Self-hosted web page change monitoring context difference " />](https://lemonade.changedetection.io/start?src=github)
+[<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/visualselector-anim.gif" style="max-width:100%;" alt="Self-hosted web page change monitoring context difference "  title="Self-hosted web page change monitoring context difference " />](https://changedetection.io?src=github)
 
 ### Easily see what changed, examine by word, line, or individual character.
 
-[<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/screenshot-diff.png" style="max-width:100%;" alt="Self-hosted web page change monitoring context difference "  title="Self-hosted web page change monitoring context difference " />](https://lemonade.changedetection.io/start?src=github)
+[<img src="https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/docs/screenshot-diff.png" style="max-width:100%;" alt="Self-hosted web page change monitoring context difference "  title="Self-hosted web page change monitoring context difference " />](https://changedetection.io?src=github)
 
 
 ### Perform interactive browser steps
@@ -35,7 +35,7 @@ Fill in text boxes, click buttons and more, setup your changedetection scenario.
 
 Using the **Browser Steps** configuration, add basic steps before performing change detection, such as logging into websites, adding a product to a cart, accept cookie logins, entering dates and refining searches.
 
-[<img src="docs/browsersteps-anim.gif" style="max-width:100%;" alt="Self-hosted web page change monitoring context difference "  title="Website change detection with interactive browser steps, login, cookies etc" />](https://lemonade.changedetection.io/start?src=github)
+[<img src="docs/browsersteps-anim.gif" style="max-width:100%;" alt="Self-hosted web page change monitoring context difference "  title="Website change detection with interactive browser steps, login, cookies etc" />](https://changedetection.io?src=github)
 
 After **Browser Steps** have been run, then visit the **Visual Selector** tab to refine the content you're interested in.
 Requires Playwright to be enabled.
@@ -49,6 +49,7 @@ Requires Playwright to be enabled.
 - Governmental department updates (changes are often only on their websites)
 - New software releases, security advisories when you're not on their mailing list.
 - Festivals with changes
+- Discogs restock alerts and monitoring
 - Realestate listing changes
 - Know when your favourite whiskey is on sale, or other special deals are announced before anyone else
 - COVID related news from government websites
@@ -63,6 +64,9 @@ Requires Playwright to be enabled.
 - You have a very sensitive list of URLs to watch and you do _not_ want to use the paid alternatives. (Remember, _you_ are the product)
 - Get notified when certain keywords appear in Twitter search results
 - Proactively search for jobs, get notified when companies update their careers page, search job portals for keywords.
+- Get alerts when new job positions are open on Bamboo HR and other job platforms
+- Website defacement monitoring
+- Pokémon Card Restock Tracker / Pokémon TCG Tracker
 
 _Need an actual Chrome runner with Javascript support? We support fetching via WebDriver and Playwright!</a>_
 
@@ -99,6 +103,8 @@ $ docker run -d --restart always -p "127.0.0.1:5000:5000" -v datastore-volume:/d
 ```
 
 `:latest` tag is our latest stable release, `:dev` tag is our bleeding edge `master` branch.
+
+Alternative docker repository over at ghcr - [ghcr.io/dgtlmoon/changedetection.io](https://ghcr.io/dgtlmoon/changedetection.io)
 
 ### Windows
 
@@ -139,7 +145,7 @@ See the wiki for more information https://github.com/dgtlmoon/changedetection.io
 ## Filters
 
 XPath, JSONPath, jq, and CSS support comes baked in! You can be as specific as you need, use XPath exported from various XPath element query creation tools. 
-(We support LXML `re:test`, `re:math` and `re:replace`.)
+(We support LXML `re:test`, `re:match` and `re:replace`.)
 
 ## Notifications
 
@@ -232,7 +238,7 @@ Supports managing the website watch list [via our API](https://changedetection.i
 Do you use changedetection.io to make money? does it save you time or money? Does it make your life easier? less stressful? Remember, we write this software when we should be doing actual paid work, we have to buy food and pay rent just like you.
 
 
-Firstly, consider taking out a [change detection monthly subscription - unlimited checks and watches](https://lemonade.changedetection.io/start) , even if you don't use it, you still get the warm fuzzy feeling of helping out the project. (And who knows, you might just use it!)
+Firstly, consider taking out a [change detection monthly subscription - unlimited checks and watches](https://changedetection.io?src=github) , even if you don't use it, you still get the warm fuzzy feeling of helping out the project. (And who knows, you might just use it!)
 
 Or directly donate an amount PayPal [![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/donate/?hosted_button_id=7CP6HR9ZCNDYJ)
 

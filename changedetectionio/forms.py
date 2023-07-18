@@ -28,6 +28,8 @@ from changedetectionio.notification import (
 
 from wtforms.fields import FormField
 
+dictfilt = lambda x, y: dict([ (i,x[i]) for i in x if i in set(y) ])
+
 valid_method = {
     'GET',
     'POST',
@@ -90,6 +92,29 @@ class SaltyPasswordField(StringField):
         else:
             self.data = False
 
+class StringTagUUID(StringField):
+
+   # process_formdata(self, valuelist) handled manually in POST handler
+
+    # Is what is shown when field <input> is rendered
+    def _value(self):
+        # Tag UUID to name, on submit it will convert it back (in the submit handler of init.py)
+        if self.data and type(self.data) is list:
+            tag_titles = []
+            for i in self.data:
+                tag = self.datastore.data['settings']['application']['tags'].get(i)
+                if tag:
+                    tag_title = tag.get('title')
+                    if tag_title:
+                        tag_titles.append(tag_title)
+
+            return ', '.join(tag_titles)
+
+        if not self.data:
+            return ''
+
+        return 'error'
+
 class TimeBetweenCheckForm(Form):
     weeks = IntegerField('Weeks', validators=[validators.Optional(), validators.NumberRange(min=0, message="Should contain zero or more seconds")])
     days = IntegerField('Days', validators=[validators.Optional(), validators.NumberRange(min=0, message="Should contain zero or more seconds")])
@@ -147,12 +172,12 @@ class ValidateContentFetcherIsReady(object):
             except urllib3.exceptions.MaxRetryError as e:
                 driver_url = some_object.command_executor
                 message = field.gettext('Content fetcher \'%s\' did not respond.' % (field.data))
-                message += '<br/>' + field.gettext(
+                message += '<br>' + field.gettext(
                     'Be sure that the selenium/webdriver runner is running and accessible via network from this container/host.')
-                message += '<br/>' + field.gettext('Did you follow the instructions in the wiki?')
-                message += '<br/><br/>' + field.gettext('WebDriver Host: %s' % (driver_url))
-                message += '<br/><a href="https://github.com/dgtlmoon/changedetection.io/wiki/Fetching-pages-with-WebDriver">Go here for more information</a>'
-                message += '<br/>'+field.gettext('Content fetcher did not respond properly, unable to use it.\n %s' % (str(e)))
+                message += '<br>' + field.gettext('Did you follow the instructions in the wiki?')
+                message += '<br><br>' + field.gettext('WebDriver Host: %s' % (driver_url))
+                message += '<br><a href="https://github.com/dgtlmoon/changedetection.io/wiki/Fetching-pages-with-WebDriver">Go here for more information</a>'
+                message += '<br>'+field.gettext('Content fetcher did not respond properly, unable to use it.\n %s' % (str(e)))
 
                 raise ValidationError(message)
 
@@ -232,11 +257,16 @@ class validateURL(object):
 
     def __call__(self, form, field):
         import validators
+
         try:
             validators.url(field.data.strip())
         except validators.ValidationFailure:
             message = field.gettext('\'%s\' is not a valid URL.' % (field.data.strip()))
             raise ValidationError(message)
+
+        from .model.Watch import is_safe_url
+        if not is_safe_url(field.data):
+            raise ValidationError('Watch protocol is not permitted by SAFE_PROTOCOL_REGEX')
 
 
 class ValidateListRegex(object):
@@ -339,15 +369,18 @@ class ValidateCSSJSONXPATHInput(object):
                     raise ValidationError("A system-error occurred when validating your jq expression")
 
 class quickWatchForm(Form):
-    url = fields.URLField('URL', validators=[validateURL()])
-    tag = StringField('Group tag', [validators.Optional()])
-    watch_submit_button = SubmitField('Watch', render_kw={"class": "pure-button pure-button-primary"})
-    edit_and_watch_submit_button = SubmitField('Edit > Watch', render_kw={"class": "pure-button pure-button-primary"})
+    from . import processors
 
+    url = fields.URLField('URL', validators=[validateURL()])
+    tags = StringTagUUID('Group tag', [validators.Optional()])
+    watch_submit_button = SubmitField('Watch', render_kw={"class": "pure-button pure-button-primary"})
+    processor = RadioField(u'Processor', choices=processors.available_processors(), default="text_json_diff")
+    edit_and_watch_submit_button = SubmitField('Edit > Watch', render_kw={"class": "pure-button pure-button-primary"})
 
 
 # Common to a single watch and the global settings
 class commonSettingsForm(Form):
+
     notification_urls = StringListField('Notification URL List', validators=[validators.Optional(), ValidateAppRiseServers()])
     notification_title = StringField('Notification Title', default='ChangeDetection.io Notification - {{ watch_url }}', validators=[validators.Optional(), ValidateJinja2Template()])
     notification_body = TextAreaField('Notification Body', default='{{ watch_url }} had a change.', validators=[validators.Optional(), ValidateJinja2Template()])
@@ -356,6 +389,10 @@ class commonSettingsForm(Form):
     extract_title_as_title = BooleanField('Extract <title> from document and use as watch title', default=False)
     webdriver_delay = IntegerField('Wait seconds before extracting text', validators=[validators.Optional(), validators.NumberRange(min=1,
                                                                                                                                     message="Should contain one or more seconds")])
+class importForm(Form):
+    from . import processors
+    processor = RadioField(u'Processor', choices=processors.available_processors(), default="text_json_diff")
+    urls = TextAreaField('URLs')
 
 class SingleBrowserStep(Form):
 
@@ -371,7 +408,7 @@ class SingleBrowserStep(Form):
 class watchForm(commonSettingsForm):
 
     url = fields.URLField('URL', validators=[validateURL()])
-    tag = StringField('Group tag', [validators.Optional()], default='')
+    tags = StringTagUUID('Group tag', [validators.Optional()], default='')
 
     time_between_check = FormField(TimeBetweenCheckForm)
 
@@ -388,11 +425,19 @@ class watchForm(commonSettingsForm):
     body = TextAreaField('Request body', [validators.Optional()])
     method = SelectField('Request method', choices=valid_method, default=default_method)
     ignore_status_codes = BooleanField('Ignore status codes (process non-2xx status codes as normal)', default=False)
-    check_unique_lines = BooleanField('Only trigger when new lines appear', default=False)
+    check_unique_lines = BooleanField('Only trigger when unique lines appear', default=False)
+
+    filter_text_added = BooleanField('Added lines', default=True)
+    filter_text_replaced = BooleanField('Replaced/changed lines', default=True)
+    filter_text_removed = BooleanField('Removed lines', default=True)
+
+    # @todo this class could be moved to its own text_json_diff_watchForm and this goes to restock_diff_Watchform perhaps
+    in_stock_only = BooleanField('Only trigger when product goes BACK to in-stock', default=True)
+
     trigger_text = StringListField('Trigger/wait for text', [validators.Optional(), ValidateListRegex()])
     if os.getenv("PLAYWRIGHT_DRIVER_URL"):
         browser_steps = FieldList(FormField(SingleBrowserStep), min_entries=10)
-    text_should_not_be_present = StringListField('Block change-detection if text matches', [validators.Optional(), ValidateListRegex()])
+    text_should_not_be_present = StringListField('Block change-detection while text matches', [validators.Optional(), ValidateListRegex()])
     webdriver_js_execute_code = TextAreaField('Execute JavaScript before change detection', render_kw={"rows": "5"}, validators=[validators.Optional()])
 
     save_button = SubmitField('Save', render_kw={"class": "pure-button pure-button-primary"})
@@ -454,17 +499,21 @@ class globalSettingsRequestForm(Form):
 # datastore.data['settings']['application']..
 class globalSettingsApplicationForm(commonSettingsForm):
 
-    base_url = StringField('Base URL', validators=[validators.Optional()])
-    global_subtractive_selectors = StringListField('Remove elements', [ValidateCSSJSONXPATHInput(allow_xpath=False, allow_json=False)])
-    global_ignore_text = StringListField('Ignore Text', [ValidateListRegex()])
-    ignore_whitespace = BooleanField('Ignore whitespace')
-    removepassword_button = SubmitField('Remove password', render_kw={"class": "pure-button pure-button-primary"})
-    empty_pages_are_a_change =  BooleanField('Treat empty pages as a change?', default=False)
-    render_anchor_tag_content = BooleanField('Render anchor tag content', default=False)
-    fetch_backend = RadioField('Fetch Method', default="html_requests", choices=content_fetcher.available_fetchers(), validators=[ValidateContentFetcherIsReady()])
     api_access_token_enabled = BooleanField('API access token security check enabled', default=True, validators=[validators.Optional()])
+    base_url = StringField('Base URL', validators=[validators.Optional()])
+    empty_pages_are_a_change =  BooleanField('Treat empty pages as a change?', default=False)
+    fetch_backend = RadioField('Fetch Method', default="html_requests", choices=content_fetcher.available_fetchers(), validators=[ValidateContentFetcherIsReady()])
+    global_ignore_text = StringListField('Ignore Text', [ValidateListRegex()])
+    global_subtractive_selectors = StringListField('Remove elements', [ValidateCSSJSONXPATHInput(allow_xpath=False, allow_json=False)])
+    ignore_whitespace = BooleanField('Ignore whitespace')
     password = SaltyPasswordField()
-
+    pager_size = IntegerField('Pager size',
+                              render_kw={"style": "width: 5em;"},
+                              validators=[validators.NumberRange(min=0,
+                                                                 message="Should be atleast zero (disabled)")])
+    removepassword_button = SubmitField('Remove password', render_kw={"class": "pure-button pure-button-primary"})
+    render_anchor_tag_content = BooleanField('Render anchor tag content', default=False)
+    shared_diff_access = BooleanField('Allow access to view diff page when password is enabled', default=False, validators=[validators.Optional()])
     filter_failure_notification_threshold_attempts = IntegerField('Number of times the filter can be missing before sending a notification',
                                                                   render_kw={"style": "width: 5em;"},
                                                                   validators=[validators.NumberRange(min=0,

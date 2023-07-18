@@ -1,3 +1,5 @@
+# HTML to TEXT/JSON DIFFERENCE FETCHER
+
 import hashlib
 import json
 import logging
@@ -8,9 +10,13 @@ import urllib3
 from changedetectionio import content_fetcher, html_tools
 from changedetectionio.blueprint.price_data_follower import PRICE_DATA_TRACK_ACCEPT, PRICE_DATA_TRACK_REJECT
 from copy import deepcopy
+from . import difference_detection_processor
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+
+name =  'Webpage Text/HTML, JSON and PDF changes'
+description = 'Detects all text changes where possible'
 
 class FilterNotFoundInResponse(ValueError):
     def __init__(self, msg):
@@ -23,7 +29,7 @@ class PDFToHTMLToolNotFound(ValueError):
 
 # Some common stuff here that can be moved to a base class
 # (set_proxy_from_list)
-class perform_site_check():
+class perform_site_check(difference_detection_processor):
     screenshot = None
     xpath_data = None
 
@@ -44,16 +50,15 @@ class perform_site_check():
 
         return regex
 
-    def run(self, uuid, skip_when_checksum_same=True):
+    def run(self, uuid, skip_when_checksum_same=True, preferred_proxy=None):
         changed_detected = False
         screenshot = False  # as bytes
         stripped_text_from_html = ""
 
         # DeepCopy so we can be sure we don't accidently change anything by reference
         watch = deepcopy(self.datastore.data['watching'].get(uuid))
-
         if not watch:
-            return
+            raise Exception("Watch no longer exists.")
 
         # Protect against file:// access
         if re.search(r'^file', watch.get('url', ''), re.IGNORECASE) and not os.getenv('ALLOW_FILE_URI', False):
@@ -64,11 +69,10 @@ class perform_site_check():
         # Unset any existing notification error
         update_obj = {'last_notification_error': False, 'last_error': False}
 
-        extra_headers = watch.get('headers', [])
-
         # Tweak the base config with the per-watch ones
-        request_headers = deepcopy(self.datastore.data['settings']['headers'])
-        request_headers.update(extra_headers)
+        request_headers = watch.get('headers', [])
+        request_headers.update(self.datastore.get_all_base_headers())
+        request_headers.update(self.datastore.get_all_headers_in_textfile_for_watch(uuid=uuid))
 
         # https://github.com/psf/requests/issues/4525
         # Requests doesnt yet support brotli encoding, so don't put 'br' here, be totally sure that the user cannot
@@ -101,7 +105,11 @@ class perform_site_check():
             # If the klass doesnt exist, just use a default
             klass = getattr(content_fetcher, "html_requests")
 
-        proxy_id = self.datastore.get_preferred_proxy_for_watch(uuid=uuid)
+        if preferred_proxy:
+            proxy_id = preferred_proxy
+        else:
+            proxy_id = self.datastore.get_preferred_proxy_for_watch(uuid=uuid)
+
         proxy_url = None
         if proxy_id:
             proxy_url = self.datastore.proxy_list.get(proxy_id).get('url')
@@ -134,7 +142,7 @@ class perform_site_check():
         self.xpath_data = fetcher.xpath_data
 
         # Track the content type
-        update_obj['content_type'] = fetcher.headers.get('Content-Type', '')
+        update_obj['content_type'] = fetcher.get_all_headers().get('content-type', '').lower()
 
         # Watches added automatically in the queue manager will skip if its the same checksum as the previous run
         # Saves a lot of CPU
@@ -154,7 +162,7 @@ class perform_site_check():
         # https://stackoverflow.com/questions/41817578/basic-method-chaining ?
         # return content().textfilter().jsonextract().checksumcompare() ?
 
-        is_json = 'application/json' in fetcher.headers.get('Content-Type', '')
+        is_json = 'application/json' in fetcher.get_all_headers().get('content-type', '').lower()
         is_html = not is_json
 
         # source: support, basically treat it as plaintext
@@ -162,7 +170,7 @@ class perform_site_check():
             is_html = False
             is_json = False
 
-        if watch.is_pdf or 'application/pdf' in fetcher.headers.get('Content-Type', '').lower():
+        if watch.is_pdf or 'application/pdf' in fetcher.get_all_headers().get('content-type', '').lower():
             from shutil import which
             tool = os.getenv("PDF_TO_HTML_TOOL", "pdftohtml")
             if not which(tool):
@@ -186,21 +194,23 @@ class perform_site_check():
 
             fetcher.content = fetcher.content.replace('</body>', metadata + '</body>')
 
+        # Better would be if Watch.model could access the global data also
+        # and then use getattr https://docs.python.org/3/reference/datamodel.html#object.__getitem__
+        # https://realpython.com/inherit-python-dict/ instead of doing it procedurely
+        include_filters_from_tags = self.datastore.get_tag_overrides_for_watch(uuid=uuid, attr='include_filters')
+        include_filters_rule = [*watch.get('include_filters', []), *include_filters_from_tags]
 
-        include_filters_rule = deepcopy(watch.get('include_filters', []))
-        # include_filters_rule = watch['include_filters']
-        subtractive_selectors = watch.get(
-            "subtractive_selectors", []
-        ) + self.datastore.data["settings"]["application"].get(
-            "global_subtractive_selectors", []
-        )
+        subtractive_selectors = [*self.datastore.get_tag_overrides_for_watch(uuid=uuid, attr='subtractive_selectors'),
+                                 *watch.get("subtractive_selectors", []),
+                                 *self.datastore.data["settings"]["application"].get("global_subtractive_selectors", [])
+                                 ]
 
         # Inject a virtual LD+JSON price tracker rule
         if watch.get('track_ldjson_price_data', '') == PRICE_DATA_TRACK_ACCEPT:
             include_filters_rule.append(html_tools.LD_JSON_PRODUCT_OFFER_SELECTOR)
 
-        has_filter_rule = include_filters_rule and len("".join(include_filters_rule).strip())
-        has_subtractive_selectors = subtractive_selectors and len(subtractive_selectors[0].strip())
+        has_filter_rule = len(include_filters_rule) and len(include_filters_rule[0].strip())
+        has_subtractive_selectors = len(subtractive_selectors) and len(subtractive_selectors[0].strip())
 
         if is_json and not has_filter_rule:
             include_filters_rule.append("json:$")
@@ -230,7 +240,7 @@ class perform_site_check():
             html_content = fetcher.content
 
             # If not JSON,  and if it's not text/plain..
-            if 'text/plain' in fetcher.headers.get('Content-Type', '').lower():
+            if 'text/plain' in fetcher.get_all_headers().get('content-type', '').lower():
                 # Don't run get_text or xpath/css filters on plaintext
                 stripped_text_from_html = html_content
             else:
@@ -272,6 +282,34 @@ class perform_site_check():
 
         # Re #340 - return the content before the 'ignore text' was applied
         text_content_before_ignored_filter = stripped_text_from_html.encode('utf-8')
+
+
+        # @todo whitespace coming from missing rtrim()?
+        # stripped_text_from_html could be based on their preferences, replace the processed text with only that which they want to know about.
+        # Rewrite's the processing text based on only what diff result they want to see
+        if watch.has_special_diff_filter_options_set() and len(watch.history.keys()):
+            # Now the content comes from the diff-parser and not the returned HTTP traffic, so could be some differences
+            from .. import diff
+            # needs to not include (added) etc or it may get used twice
+            # Replace the processed text with the preferred result
+            rendered_diff = diff.render_diff(previous_version_file_contents=watch.get_last_fetched_before_filters(),
+                                                       newest_version_file_contents=stripped_text_from_html,
+                                                       include_equal=False,  # not the same lines
+                                                       include_added=watch.get('filter_text_added', True),
+                                                       include_removed=watch.get('filter_text_removed', True),
+                                                       include_replaced=watch.get('filter_text_replaced', True),
+                                                       line_feed_sep="\n",
+                                                       include_change_type_prefix=False)
+
+            watch.save_last_fetched_before_filters(text_content_before_ignored_filter)
+
+            if not rendered_diff and stripped_text_from_html:
+                # We had some content, but no differences were found
+                # Store our new file as the MD5 so it will trigger in the future
+                c = hashlib.md5(text_content_before_ignored_filter.translate(None, b'\r\n\t ')).hexdigest()
+                return False, {'previous_md5': c}, stripped_text_from_html.encode('utf-8')
+            else:
+                stripped_text_from_html = rendered_diff
 
         # Treat pages with no renderable text content as a change? No by default
         empty_pages_are_a_change = self.datastore.data['settings']['application'].get('empty_pages_are_a_change', False)
@@ -331,6 +369,7 @@ class perform_site_check():
             blocked = True
             # Filter and trigger works the same, so reuse it
             # It should return the line numbers that match
+            # Unblock flow if the trigger was found (some text remained after stripped what didnt match)
             result = html_tools.strip_ignore_text(content=str(stripped_text_from_html),
                                                   wordlist=trigger_text,
                                                   mode="line numbers")

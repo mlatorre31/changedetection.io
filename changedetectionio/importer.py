@@ -29,6 +29,7 @@ class import_url_list(Importer):
             data,
             flash,
             datastore,
+            processor=None
             ):
 
         urls = data.split("\n")
@@ -51,8 +52,13 @@ class import_url_list(Importer):
 
             # Flask wtform validators wont work with basic auth, use validators package
             # Up to 5000 per batch so we dont flood the server
-            if len(url) and validators.url(url.replace('source:', '')) and good < 5000:
-                new_uuid = datastore.add_watch(url=url.strip(), tag=tags, write_to_disk_now=False)
+            # @todo validators.url failed on local hostnames (such as referring to ourself when using browserless)
+            if len(url) and 'http' in url.lower() and good < 5000:
+                extras = None
+                if processor:
+                    extras = {'processor': processor}
+                new_uuid = datastore.add_watch(url=url.strip(), tag=tags, write_to_disk_now=False, extras=extras)
+
                 if new_uuid:
                     # Straight into the queue.
                     self.new_uuids.append(new_uuid)
@@ -79,7 +85,8 @@ class import_distill_io_json(Importer):
         now = time.time()
         self.new_uuids=[]
 
-
+        # @todo Use JSONSchema like in the API to validate here.
+        
         try:
             data = json.loads(data.strip())
         except json.decoder.JSONDecodeError:
@@ -114,11 +121,8 @@ class import_distill_io_json(Importer):
                 except IndexError:
                     pass
 
-
-                if d.get('tags', False):
-                    extras['tag'] = ", ".join(d['tags'])
-
                 new_uuid = datastore.add_watch(url=d['uri'].strip(),
+                                               tag=",".join(d.get('tags', [])),
                                                extras=extras,
                                                write_to_disk_now=False)
 

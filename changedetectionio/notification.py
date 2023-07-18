@@ -5,15 +5,18 @@ import json
 
 valid_tokens = {
     'base_url': '',
-    'watch_url': '',
-    'watch_uuid': '',
-    'watch_title': '',
-    'watch_tag': '',
+    'current_snapshot': '',
     'diff': '',
+    'diff_added': '',
     'diff_full': '',
+    'diff_removed': '',
     'diff_url': '',
     'preview_url': '',
-    'current_snapshot': ''
+    'triggered_text': '',
+    'watch_tag': '',
+    'watch_title': '',
+    'watch_url': '',
+    'watch_uuid': '',
 }
 
 default_notification_format_for_watch = 'System default'
@@ -86,9 +89,15 @@ def process_notification(n_object, datastore):
     n_body = jinja2_env.from_string(n_object.get('notification_body', default_notification_body)).render(**notification_parameters)
     n_title = jinja2_env.from_string(n_object.get('notification_title', default_notification_title)).render(**notification_parameters)
     n_format = valid_notification_formats.get(
-        n_object['notification_format'],
+        n_object.get('notification_format', default_notification_format),
         valid_notification_formats[default_notification_format],
     )
+
+    # If we arrived with 'System default' then look it up
+    if n_format == default_notification_format_for_watch and datastore.data['settings']['application'].get('notification_format') != default_notification_format_for_watch:
+        # Initially text or whatever
+        n_format = datastore.data['settings']['application'].get('notification_format', valid_notification_formats[default_notification_format])
+
     
     # https://github.com/caronc/apprise/wiki/Development_LogCapture
     # Anything higher than or equal to WARNING (which covers things like Connection errors)
@@ -120,10 +129,10 @@ def process_notification(n_object, datastore):
                     url += k + 'avatar_url=https://raw.githubusercontent.com/dgtlmoon/changedetection.io/master/changedetectionio/static/images/avatar-256x256.png'
 
                 if url.startswith('tgram://'):
-                    # Telegram only supports a limit subset of HTML, remove the '<br/>' we place in.
+                    # Telegram only supports a limit subset of HTML, remove the '<br>' we place in.
                     # re https://github.com/dgtlmoon/changedetection.io/issues/555
                     # @todo re-use an existing library we have already imported to strip all non-allowed tags
-                    n_body = n_body.replace('<br/>', '\n')
+                    n_body = n_body.replace('<br>', '\n')
                     n_body = n_body.replace('</br>', '\n')
                     # real limit is 4096, but minus some for extra metadata
                     payload_max_size = 3600
@@ -142,9 +151,12 @@ def process_notification(n_object, datastore):
                     # Apprise will default to HTML, so we need to override it
                     # So that whats' generated in n_body is in line with what is going to be sent.
                     # https://github.com/caronc/apprise/issues/633#issuecomment-1191449321
-                    if not 'format=' in url and (n_format == 'text' or n_format == 'markdown'):
+                    if not 'format=' in url and (n_format == 'Text' or n_format == 'Markdown'):
                         prefix = '?' if not '?' in url else '&'
+                        # Apprise format is lowercase text https://github.com/caronc/apprise/issues/633
+                        n_format = n_format.tolower()
                         url = "{}{}format={}".format(url, prefix, n_format)
+                    # If n_format == HTML, then apprise email should default to text/html and we should be sending HTML only
 
                 apobj.add(url)
 
@@ -183,8 +195,13 @@ def create_notification_parameters(n_object, datastore):
     uuid = n_object['uuid'] if 'uuid' in n_object else ''
 
     if uuid != '':
-        watch_title = datastore.data['watching'][uuid]['title']
-        watch_tag = datastore.data['watching'][uuid]['tag']
+        watch_title = datastore.data['watching'][uuid].get('title', '')
+        tag_list = []
+        tags = datastore.get_all_tags_for_watch(uuid)
+        if tags:
+            for tag_uuid, tag in tags.items():
+                tag_list.append(tag.get('title'))
+        watch_tag = ', '.join(tag_list)
     else:
         watch_title = 'Change Detection'
         watch_tag = ''
@@ -209,15 +226,18 @@ def create_notification_parameters(n_object, datastore):
     tokens.update(
         {
             'base_url': base_url if base_url is not None else '',
+            'current_snapshot': n_object['current_snapshot'] if 'current_snapshot' in n_object else '',
+            'diff': n_object.get('diff', ''),  # Null default in the case we use a test
+            'diff_added': n_object.get('diff_added', ''),  # Null default in the case we use a test
+            'diff_full': n_object.get('diff_full', ''),  # Null default in the case we use a test
+            'diff_removed': n_object.get('diff_removed', ''),  # Null default in the case we use a test
+            'diff_url': diff_url,
+            'preview_url': preview_url,
+            'triggered_text': n_object.get('triggered_text', ''),
+            'watch_tag': watch_tag if watch_tag is not None else '',
+            'watch_title': watch_title if watch_title is not None else '',
             'watch_url': watch_url,
             'watch_uuid': uuid,
-            'watch_title': watch_title if watch_title is not None else '',
-            'watch_tag': watch_tag if watch_tag is not None else '',
-            'diff_url': diff_url,
-            'diff': n_object.get('diff', ''),  # Null default in the case we use a test
-            'diff_full': n_object.get('diff_full', ''),  # Null default in the case we use a test
-            'preview_url': preview_url,
-            'current_snapshot': n_object['current_snapshot'] if 'current_snapshot' in n_object else ''
         })
 
     return tokens

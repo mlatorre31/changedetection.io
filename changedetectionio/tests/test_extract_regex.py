@@ -10,10 +10,10 @@ from ..html_tools import *
 def set_original_response():
     test_return_data = """<html>
        <body>
-     Some initial text</br>
+     Some initial text<br>
      <p>Which is across multiple lines</p>
-     </br>
-     So let's see what happens.  </br>
+     <br>
+     So let's see what happens.  <br>
      <div id="sametext">Some text thats the same</div>
      <div class="changetext">Some text that will change</div>     
      </body>
@@ -28,12 +28,12 @@ def set_original_response():
 def set_modified_response():
     test_return_data = """<html>
        <body>
-     Some initial text</br>
+     Some initial text<br>
      <p>which has this one new line</p>
-     </br>
-     So let's see what happens.  </br>
+     <br>
+     So let's see what happens.  <br>
      <div id="sametext">Some text thats the same</div>
-     <div class="changetext">Some text that did change ( 1000 online <br/> 80 guests<br/>  2000 online )</div>
+     <div class="changetext">Some text that did change ( 1000 online <br> 80 guests<br>  2000 online )</div>
      <div class="changetext">SomeCase insensitive 3456</div>
      </body>
      </html>
@@ -49,8 +49,8 @@ def set_multiline_response():
     test_return_data = """<html>
        <body>
      
-     <p>Something <br/>
-        across 6 billion multiple<br/>
+     <p>Something <br>
+        across 6 billion multiple<br>
         lines
      </p>
      
@@ -91,7 +91,7 @@ def test_check_filter_multiline(client, live_server):
         data={"include_filters": '',
               'extract_text': '/something.+?6 billion.+?lines/si',
               "url": test_url,
-              "tag": "",
+              "tags": "",
               "headers": "",
               'fetch_backend': "html_requests"
               },
@@ -146,7 +146,7 @@ def test_check_filter_and_regex_extract(client, live_server):
         data={"include_filters": include_filters,
               'extract_text': '\d+ online\r\n\d+ guests\r\n/somecase insensitive \d+/i\r\n/somecase insensitive (345\d)/i',
               "url": test_url,
-              "tag": "",
+              "tags": "",
               "headers": "",
               'fetch_backend': "html_requests"
               },

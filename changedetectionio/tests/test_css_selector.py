@@ -12,10 +12,10 @@ def test_setup(live_server):
 def set_original_response():
     test_return_data = """<html>
        <body>
-     Some initial text</br>
+     Some initial text<br>
      <p>Which is across multiple lines</p>
-     </br>
-     So let's see what happens.  </br>
+     <br>
+     So let's see what happens.  <br>
      <div id="sametext">Some text thats the same</div>
      <div id="changetext">Some text that will change</div>
      </body>
@@ -29,10 +29,10 @@ def set_original_response():
 def set_modified_response():
     test_return_data = """<html>
        <body>
-     Some initial text</br>
+     Some initial text<br>
      <p>which has this one new line</p>
-     </br>
-     So let's see what happens.  </br>
+     <br>
+     So let's see what happens.  <br>
      <div id="sametext">Some text thats the same</div>
      <div id="changetext">Some text that changes</div>
      </body>
@@ -96,7 +96,7 @@ def test_check_markup_include_filters_restriction(client, live_server):
     # Add our URL to the import page
     res = client.post(
         url_for("edit_page", uuid="first"),
-        data={"include_filters": include_filters, "url": test_url, "tag": "", "headers": "", 'fetch_backend': "html_requests"},
+        data={"include_filters": include_filters, "url": test_url, "tags": "", "headers": "", 'fetch_backend': "html_requests"},
         follow_redirects=True
     )
     assert b"Updated watch." in res.data
@@ -157,7 +157,7 @@ def test_check_multiple_filters(client, live_server):
         url_for("edit_page", uuid="first"),
         data={"include_filters": include_filters,
               "url": test_url,
-              "tag": "",
+              "tags": "",
               "headers": "",
               'fetch_backend': "html_requests"},
         follow_redirects=True
