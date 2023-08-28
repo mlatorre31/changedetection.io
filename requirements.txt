@@ -10,7 +10,8 @@ flask~=2.0
 inscriptis~=2.2
 pytz
 timeago~=1.0
-validators
+validators~=0.21
+
 
 # Set these versions together to avoid a RequestsDependencyWarning
 # >= 2.26 also adds Brotli support if brotli is installed
@@ -71,3 +72,6 @@ pillow
 # Include pytest, so if theres a support issue we can ask them to run these tests on their setup
 pytest ~=7.2
 pytest-flask ~=1.2
+
+# Pin jsonschema version to prevent build errors on armv6 while rpds-py wheels aren't available (1708)
+jsonschema==4.17.3
