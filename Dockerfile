@@ -25,7 +25,7 @@ RUN pip install --target=/dependencies -r /requirements.txt
 # Playwright is an alternative to Selenium
 # Excluded this package from requirements.txt to prevent arm/v6 and arm/v7 builds from failing
 # https://github.com/dgtlmoon/changedetection.io/pull/1067 also musl/alpine (not supported)
-RUN pip install --target=/dependencies playwright~=1.39 \
+RUN pip install --target=/dependencies playwright~=1.40 \
     || echo "WARN: Failed to install Playwright. The application can still run, but the Playwright option will be disabled."
 
 # Final image stage
@@ -53,12 +53,17 @@ ENV PYTHONPATH=/usr/local
 
 EXPOSE 5000
 
-# The actual flask app
+# The actual flask app module
 COPY changedetectionio /app/changedetectionio
-
-# The eventlet server wrapper
+# Starting wrapper
 COPY changedetection.py /app/changedetection.py
 
-WORKDIR /app
+# Github Action test purpose(test-only.yml).
+# On production, it is effectively LOGGER_LEVEL=''.
+ARG LOGGER_LEVEL=''
+ENV LOGGER_LEVEL "$LOGGER_LEVEL"
 
-CMD [ "python", "./changedetection.py" , "-d", "/datastore"]
+WORKDIR /app
+CMD ["python", "./changedetection.py", "-d", "/datastore"]
+
+
